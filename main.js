@@ -204,6 +204,20 @@ ipcMain.handle('update-image', async (e, p, patch) => {
   if (typeof patch.note === 'string') allowed.note = patch.note;
   if (typeof patch.starred === 'boolean') allowed.starred = patch.starred;
   if (typeof patch.nsfw === 'boolean') allowed.nsfw = patch.nsfw;
+  // 手动改分类：标记 aiManual=true，重新跑 AI 时跳过，避免覆盖用户纠正
+  // 传空字符串 = 清除分类（恢复未分类）
+  if (typeof patch.aiCategory === 'string') {
+    const v = patch.aiCategory.trim();
+    if (v) {
+      allowed.aiCategory = v;
+      allowed.aiManual = true;
+      allowed.aiConf = null;
+    } else {
+      allowed.aiCategory = null;
+      allowed.aiManual = false;
+      allowed.aiConf = null;
+    }
+  }
   DB.updateImage(p, allowed);
   DB.flushSync();
   return { ok: true };
@@ -510,7 +524,7 @@ ipcMain.handle('ai-classify-all', async (e, opts) => {
   send('ai:start', {});
   try {
     await AI.ensure(modelDir());
-    const targets = DB.getImages().filter(i => !i.trashed && !i.missing && (redo || !i.aiCategory || !AI.CATEGORIES.includes(i.aiCategory)));
+    const targets = DB.getImages().filter(i => !i.trashed && !i.missing && !i.aiManual && (redo || !i.aiCategory || !AI.CATEGORIES.includes(i.aiCategory)));
     const total = targets.length;
     send('ai:total', { total });
     let done = 0, okN = 0;

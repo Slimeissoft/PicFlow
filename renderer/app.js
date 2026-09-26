@@ -59,7 +59,7 @@ const state = {
   dupStale: true,
   aiRunning: false, aiDone: 0, aiTotal: 0, aiError: ''
 };
-const AI_CATS = ['角色图', '风景图', '插画·CG', '动物·萌宠', '物品·道具', '美食', '其他'];
+const AI_CATS = ['角色图', '风景图', '插画·CG', '动物·萌宠', '物品·道具', '美食', '截图', '其他'];
 const byPath = new Map();
 const thumbCache = new Map();
 const io = new IntersectionObserver(entries => {
@@ -360,6 +360,7 @@ function updateSelbar() {
   set('star', v.type !== 'trash');
   set('nsfw', v.type !== 'trash');
   set('tag', v.type !== 'trash');
+  set('aicat', v.type !== 'trash');
   set('album', v.type !== 'trash');
   set('move', v.type !== 'trash');
   set('rename', v.type !== 'trash');
@@ -376,6 +377,7 @@ $('#selbar').addEventListener('click', e => {
     if (act === 'star') batchStar();
     else if (act === 'nsfw') batchNsfw();
     else if (act === 'tag') tagModal();
+    else if (act === 'aicat') aicatModal();
     else if (act === 'album') albumModal();
     else if (act === 'move') moveSelected();
     else if (act === 'rename') renameModal();
@@ -557,7 +559,14 @@ function renderLbPanel(it) {
       <button id="lb-star"${starCls}>${it.starred ? '★ 已星标' : '☆ 加星标'}</button>
       <button id="lb-nsfw"${nsfwCls}>${it.nsfw ? '🔞 NSFW' : '🔞 标记 NSFW'}</button>
     </div>
-    <div class="lb-aicat">AI 分类：<b>${it.aiCategory || '未分类'}</b></div>
+    <div class="lb-aicat">
+      <span class="lb-aicat-lbl">AI 分类</span>
+      <select id="lb-aicat-sel" class="lb-select">
+        <option value="">未分类</option>
+        ${AI_CATS.map(c => `<option value="${esc(c)}"${it.aiCategory === c ? ' selected' : ''}>${esc(c)}</option>`).join('')}
+      </select>
+      ${it.aiManual ? '<span class="lb-manual" title="已手动纠正，重新跑 AI 不会覆盖">手动</span>' : ''}
+    </div>
     <div class="lb-info">
       <div><span>拍摄时间</span><b>${it.exifDate ? fmtDate(it.exifDate) : '未记录'}</b></div>
       <div><span>修改时间</span><b>${fmtDate(it.mtime)}</b></div>
@@ -600,6 +609,17 @@ function renderLbPanel(it) {
     it.note = e.target.value;
     await api.updateImage(it.path, { note: it.note });
     toast('备注已保存');
+  };
+  $('#lb-aicat-sel').onchange = async e => {
+    const v = e.target.value;
+    it.aiCategory = v || null;
+    it.aiManual = !!v;
+    it.aiConf = null;
+    await api.updateImage(it.path, { aiCategory: v });
+    renderLbPanel(it);
+    renderSidebar();
+    renderGrid();
+    toast(v ? `已改为「${v}」` : '已清除分类');
   };
   $('#lb-folder').onclick = () => api.openInFolder(it.path);
   $('#lb-star').onclick = async () => { await toggleStar(it.path); renderLbPanel(it); };
@@ -719,6 +739,35 @@ function tagModal() {
   input.onkeydown = e => { if (e.key === 'Enter') { add(input.value); input.value = ''; } };
   ov.querySelectorAll('[data-add]').forEach(el => { el.onclick = () => add(el.dataset.add); });
   ov.querySelector('#tg-done').onclick = () => { ov.remove(); refreshLibrary(); };
+}
+
+/* 批量改分类 */
+function aicatModal() {
+  const paths = [...state.selected];
+  if (!paths.length) return;
+  const ov = showModal(`<h3>批量改分类（${paths.length} 张）</h3>
+    <div class="row"><label class="f-label">选择分类</label>
+      <select id="ac-sel" class="lb-select">
+        <option value="">未分类（清除）</option>
+        ${AI_CATS.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}
+      </select></div>
+    <div class="modal-foot"><button class="chip" id="ac-cancel">取消</button>
+    <button class="btn-primary" id="ac-ok">应用</button></div>`);
+  ov.querySelector('#ac-cancel').onclick = () => ov.remove();
+  ov.querySelector('#ac-ok').onclick = async () => {
+    const v = ov.querySelector('#ac-sel').value;
+    ov.remove();
+    for (const p of paths) {
+      const im = byPath.get(p);
+      if (im) { im.aiCategory = v || null; im.aiManual = !!v; im.aiConf = null; }
+      await api.updateImage(p, { aiCategory: v });
+    }
+    state.selected.clear();
+    syncSelectionUI();
+    renderGrid();
+    renderSidebar();
+    toast(v ? `已将 ${paths.length} 张改为「${v}」` : `已清除 ${paths.length} 张的分类`);
+  };
 }
 
 /* 加入相册 */

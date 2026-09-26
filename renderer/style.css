@@ -344,8 +344,16 @@ body {
 .lb-tools button:hover { background: #f3f4f6; }
 .lb-tools button.on.star-on { background: #fef9c3; border-color: #fde047; color: #b8860b; }
 .lb-tools button.on.nsfw-on { background: #fef2f0; border-color: #f6c9bd; color: #b23b2a; }
-.lb-aicat { margin: 6px 0 2px; font-size: 12px; color: var(--muted); }
+.lb-aicat { margin: 6px 0 2px; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.lb-aicat-lbl { color: var(--muted); }
 .lb-aicat b { color: var(--text); }
+.lb-manual { font-size: 10px; padding: 1px 6px; border-radius: 5px; background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; }
+.lb-select {
+  padding: 5px 8px; border-radius: 7px; border: 1px solid var(--border);
+  background: #fff; color: var(--text); font-size: 12.5px; cursor: pointer;
+  outline: none; transition: .12s; flex: 1; min-width: 90px;
+}
+.lb-select:hover, .lb-select:focus { border-color: var(--accent); }
 
 #lb-panel {
   width: 300px; flex-shrink: 0; background: var(--panel);

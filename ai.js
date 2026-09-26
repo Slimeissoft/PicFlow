@@ -3,25 +3,49 @@
  * PicFlow 轻量 AI 图像分类（完全离线）
  * 模型：MobileNetV2（int8 量化，约 4.3 MB）+ ImageNet 1000 类标签
  * 推理：onnxruntime-node（CPU），输入取自缩略图（440px JPEG）
- * 输出：面向二次元图库的七大类别 —— 角色图 / 风景图 / 插画·CG / 动物·萌宠 / 物品·道具 / 美食 / 其他
+ * 输出：面向二次元图库的八大类别 ——
+ *   角色图 / 风景图 / 插画·CG / 动物·萌宠 / 物品·道具 / 美食 / 截图 / 其他
+ *
+ * v1.1.0 改进（针对二次元图库误判修复）：
+ *  1. 新增「截图」类别：把屏幕/UI/印刷品词（web site/screen/monitor/menu/
+ *     page/newspaper/comic book/jigsaw puzzle 等）从「插画·CG」剥离，
+ *     抽卡结果截图、英语学习截图、游戏 UI 截图不再被误塞进插画·CG。
+ *  2. 美食只保留成品菜肴 + 明确饮品甜品，去掉蔬菜水果原材料词
+ *     （broccoli/orange/apple/corn/cabbage 等容易被风景/静物误触发）。
+ *  3. 角色图优先级提到风景图前：角色立绘背景的海滩/山谷词不该压过
+ *     人物主体服饰词。
+ *  4. 兜底不再赌「角色图」：无关键词命中一律归「其他」，宁可少分不要错分。
+ *  5. MobileNetV2 是真实照片模型，对二次元/截图语义理解弱，
+ *     分类不准时请在详情面板手动纠正（AI 不会覆盖手动改过的分类）。
  * ============================================================ */
 const path = require('path');
 const fs = require('fs');
 
-const CATEGORIES = ['角色图', '风景图', '插画·CG', '动物·萌宠', '物品·道具', '美食', '其他'];
+const CATEGORIES = ['角色图', '风景图', '插画·CG', '动物·萌宠', '物品·道具', '美食', '截图', '其他'];
 
 let ort = null;        // onnxruntime-node 模块
 let session = null;    // InferenceSession
 let labels = null;     // ImageNet 标签数组
 
 /* ---------- 类别关键词映射（对 ImageNet 同义词组做词边界匹配） ----------
- * 设计原则（面向二次元图库）：
- *  - 角色图优先级靠后但兜底：服饰/化妆品/头饰是 MobileNet 看人物时的高频输出，
- *    无关键词命中时低置信度默认归"角色图"（二次元图库基数最大类）。
- *  - 物品·道具放最后且关键词收紧：只保留明确的武器/乐器/车辆/家具/运动器材/厨具，
- *    去掉 ski/book jacket/pipe/stage/vase/umbrella 等容易把动漫角色/场景误判为物品的泛化词。
+ * 设计原则（v1.1.0，面向二次元图库）：
+ *  - 截图最优先：屏幕/UI/印刷品词很明确，不会和其它类混淆，抽卡/学习截图能正确归位。
+ *  - 角色图在风景图前：二次元立绘的背景风景词不该压过人物服饰词。
+ *  - 美食只收成品菜肴：蔬菜水果原材料词移除，避免风景/静物误触发。
+ *  - 插画·CG 收紧到纯艺术词：comic book/书本封面/拼图等移到「截图」。
+ *  - 物品·道具最后：只保留武器/乐器/车辆/家具/运动器材/厨具。
  */
 const KW = {
+  '截图': [
+    // 屏幕 / 网页 / UI
+    'web site', 'website', 'web', 'page', 'screen', 'CRT screen', 'monitor',
+    'computer keyboard', 'notebook', 'binder', 'menu', 'menu card', 'envelope',
+    // 印刷品 / 文字载体
+    'newspaper', 'magazine', 'comic book', 'handbill', 'billboard', 'pamphlet',
+    'book jacket', 'dust jacket', 'jigsaw puzzle', 'crossword puzzle',
+    // 带数字/文字显示的器物
+    'digital clock', 'analog clock', 'wall clock', 'stopwatch', 'typewriter', 'printer'
+  ],
   '动物·萌宠': [
     'fish', 'shark', 'ray', 'whale', 'dolphin', 'porpoise', 'eel', 'salmon', 'trout', 'carp',
     'goldfish', 'tench', 'barracouta', 'sturgeon', 'gar', 'lionfish', 'puffer', 'anemone',
@@ -60,18 +84,29 @@ const KW = {
     'centipede', 'isopod', 'trilobite', 'worm', 'sea slug', 'chiton', 'barnacle'
   ],
   '美食': [
+    // 只保留成品菜肴 + 明确饮品甜品，去掉蔬菜水果原材料词（v1.1.0 收紧）
     'pizza', 'burger', 'cheeseburger', 'hotdog', 'hot dog', 'sandwich', 'honeycomb', 'omelet',
     'burrito', 'taco', 'guacamole', 'consomme', 'hot pot', 'trifle', 'ice cream', 'ice lolly',
     'icecream', 'French loaf', 'bagel', 'pretzel', 'mashed potato', 'spaghetti', 'carbonara',
     'noodle', 'ramen', 'sushi', 'sashimi', 'eggnog', 'red wine', 'espresso',
     'coffee', 'meat loaf', 'potpie', 'dough', 'chocolate sauce', 'baking',
-    'broccoli', 'cauliflower', 'zucchini', 'spaghetti squash', 'acorn squash', 'butternut squash',
-    'cucumber', 'artichoke', 'bell pepper', 'cardoon', 'mushroom', 'Granny Smith', 'strawberry',
-    'orange', 'lemon', 'fig', 'pineapple', 'banana', 'jackfruit', 'custard apple', 'pomegranate',
-    'acorn', 'peanut', 'corn', 'cabbage', 'head cabbage', 'lettuce', 'potato',
-    'sweet potato', 'onion', 'garlic', 'ginger', 'carrot', 'apple', 'bakery', 'cake',
-    'cupcake', 'cookie', 'cracker', 'waffle', 'pancake', 'pie', 'toast', 'cheese', 'egg', 'bacon',
-    'ham', 'steak', 'chicken breast', 'fries', 'salad', 'dessert', 'sweets', 'confectionery'
+    'bakery', 'cake', 'cupcake', 'cookie', 'cracker', 'waffle', 'pancake', 'pie', 'toast',
+    'cheese', 'bacon', 'ham', 'steak', 'chicken breast', 'fries', 'salad', 'dessert',
+    'sweets', 'confectionery'
+  ],
+  '角色图': [
+    // 服饰 / 妆容 / 头饰 —— MobileNet 看人物时的高频输出
+    'bikini', 'two-piece', 'maillot', 'kimono', 'jersey', 'T-shirt', 'tee shirt', 'suit',
+    'suit of clothes', 'gown', 'abaya', 'uniform', 'sweatshirt', 'cardigan', 'poncho', 'fur coat',
+    'fez', 'sombrero', 'bonnet', 'shower cap', 'cowboy hat', 'sunbonnet', 'wig', 'mask',
+    'oxygen mask', 'gas mask', 'face powder', 'lipstick', 'rouge', 'mascara', 'nail polish',
+    'hair spray', 'hair slide', 'perfume', 'toiletry', 'sunglasses', 'necklace', 'neck brace',
+    'running suit', 'overskirt', 'pajama', 'miniskirt', 'sarong', 'half-slip', 'military uniform',
+    'swimming trunks', 'breastplate', 'cuirass', 'apron', 'bib', 'diaper', 'wardrobe', 'crinoline',
+    'tights', 'leotard', 'raincoat', 'coat', 'trench coat', 'wool', 'velvet', 'sandal',
+    'running shoe', 'loafer', 'ballet skirt', 'hat', 'cap', 'helmet', 'football helmet',
+    'crash helmet', 'ski mask', 'tank suit', 'teddy', 'brassiere', 'stole', 'fur',
+    'bowtie', 'bolo', 'sweater', 'pullover', 'turtleneck', 'blazer', 'cape', 'cloak'
   ],
   '风景图': [
     'lakeshore', 'lakeside', 'seashore', 'seacoast', 'coast', 'seaside', 'beach',
@@ -96,24 +131,9 @@ const KW = {
     'subway station', 'gas pump', 'gasoline pump', 'petrol pump', 'quadrangle'
   ],
   '插画·CG': [
-    'comic book', 'book jacket', 'dust jacket', 'jigsaw puzzle', 'crossword puzzle', 'menu',
-    'envelope', 'web site', 'website', 'screen', 'CRT screen', 'monitor', 'computer keyboard',
-    'notebook', 'binder', 'web', 'page', 'newspaper', 'magazine', 'comic', 'manga', 'cartoon',
-    'drawing', 'sketch', 'illustration', 'poster', 'pamphlet', 'handbill', 'billboard',
-    'menu card', 'painting', 'art', 'canvas', 'sculpture', 'statue', 'bust'
-  ],
-  '角色图': [
-    'bikini', 'two-piece', 'maillot', 'kimono', 'jersey', 'T-shirt', 'tee shirt', 'suit',
-    'suit of clothes', 'gown', 'abaya', 'uniform', 'sweatshirt', 'cardigan', 'poncho', 'fur coat',
-    'fez', 'sombrero', 'bonnet', 'shower cap', 'cowboy hat', 'sunbonnet', 'wig', 'mask',
-    'oxygen mask', 'gas mask', 'face powder', 'lipstick', 'rouge', 'mascara', 'nail polish',
-    'hair spray', 'hair slide', 'perfume', 'toiletry', 'sunglasses', 'necklace', 'neck brace',
-    'running suit', 'overskirt', 'pajama', 'miniskirt', 'sarong', 'half-slip', 'military uniform',
-    'swimming trunks', 'breastplate', 'cuirass', 'apron', 'bib', 'diaper', 'wardrobe', 'crinoline',
-    'tights', 'leotard', 'raincoat', 'coat', 'trench coat', 'wool', 'velvet', 'sandal',
-    'running shoe', 'loafer', 'ballet skirt', 'hat', 'cap', 'helmet', 'football helmet',
-    'crash helmet', 'ski mask', 'tank suit', 'teddy', 'brassiere', 'stole', 'fur',
-    'bowtie', 'bolo', 'sweater', 'pullover', 'turtleneck', 'blazer', 'cape', 'cloak'
+    // 收紧到纯艺术词（v1.1.0）：comic book/书本封面/拼图移到「截图」
+    'comic', 'manga', 'cartoon', 'drawing', 'sketch', 'illustration', 'poster',
+    'painting', 'art', 'canvas', 'sculpture', 'statue', 'bust'
   ],
   '物品·道具': [
     // 武器
@@ -134,13 +154,12 @@ const KW = {
     'airship', 'balloon', 'parachute', 'hang glider', 'spacecraft', 'scooter', 'moped',
     'motor scooter', 'motorcycle', 'motorbike', 'minibike', 'bicycle', 'mountain bike',
     'tricycle', 'unicycle', 'rickshaw', 'oxcart', 'horse cart', 'carriage', 'wheelchair',
-    // 家具 / 钟表 / 文具 / 包
-    'table lamp', 'lampshade', 'candle', 'torch', 'lighter', 'matchstick', 'hourglass', 'stopwatch',
-    'digital clock', 'analog clock', 'wall clock', 'abacus', 'typewriter', 'printer', 'mailbox',
-    'postbox', 'filing cabinet', 'safe', 'chest', 'coffin', 'carton', 'packet', 'plastic bag',
-    'grocery bag', 'purse', 'handbag', 'briefcase', 'shopping cart', 'shopping basket',
-    'bathtub', 'washbasin', 'sink', 'toilet seat', 'barber chair', 'desk', 'bookcase',
-    'wardrobe', 'china cabinet', 'file cabinet', 'rocking chair', 'sofa', 'couch',
+    // 家具 / 容器 / 包（clock/typewriter/printer 已移到「截图」）
+    'table lamp', 'lampshade', 'candle', 'torch', 'lighter', 'matchstick', 'hourglass',
+    'abacus', 'mailbox', 'postbox', 'filing cabinet', 'safe', 'chest', 'coffin', 'carton',
+    'packet', 'plastic bag', 'grocery bag', 'purse', 'handbag', 'briefcase', 'shopping cart',
+    'shopping basket', 'bathtub', 'washbasin', 'sink', 'toilet seat', 'barber chair', 'desk',
+    'bookcase', 'wardrobe', 'china cabinet', 'file cabinet', 'rocking chair', 'sofa', 'couch',
     'lounge', 'daybed', 'four-poster',
     // 运动器材
     'basketball', 'rugby ball', 'soccer ball', 'baseball', 'volleyball', 'croquet ball',
@@ -151,7 +170,12 @@ const KW = {
   ]
 };
 
-const ORDER = ['动物·萌宠', '美食', '风景图', '插画·CG', '角色图', '物品·道具']; // 匹配优先级（物品最后，减少动漫误判）
+/* 匹配优先级（v1.1.0）：
+ * 截图 > 动物 > 美食 > 角色图 > 风景图 > 插画·CG > 物品·道具
+ * - 截图最优先：屏幕/UI 词极明确，抽卡/学习截图优先归位
+ * - 角色图在风景图前：立绘背景的 beach/cliff 不该压过人物服饰词
+ * - 物品·道具最后：减少动漫角色/场景被误判为实物 */
+const ORDER = ['截图', '动物·萌宠', '美食', '角色图', '风景图', '插画·CG', '物品·道具'];
 
 function buildMatchers() {
   const m = {};
@@ -173,10 +197,10 @@ function mapCategory(top) {
       }
     }
   }
-  // 无关键词命中：二次元图库中"识别不出"的多数是角色立绘/CG → 默认归角色图；
-  // 若模型非常确信是某实物（高置信度）则归"其他"。
-  if (top[0] && top[0].prob >= 0.45) return { category: '其他', hit: top[0].label, prob: top[0].prob };
-  return { category: '角色图', hit: top[0] ? top[0].label : '', prob: top[0] ? top[0].prob : 0 };
+  // 无关键词命中：MobileNetV2 对二次元/截图语义理解弱，
+  // 看不清的图宁可归「其他」也不要乱猜（v1.1.0 改：不再赌「角色图」）。
+  // 用户可在详情面板手动纠正分类。
+  return { category: '其他', hit: top[0] ? top[0].label : '', prob: top[0] ? top[0].prob : 0 };
 }
 
 /* ---------- 初始化 ---------- */
