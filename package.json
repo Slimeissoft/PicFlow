@@ -1,0 +1,70 @@
+{
+  "name": "picflow",
+  "productName": "PicFlow 图片管家",
+  "version": "1.0.0",
+  "description": "本地图片整理与管理桌面应用",
+  "main": "main.js",
+  "author": "PicFlow",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win"
+  },
+  "dependencies": {
+    "onnxruntime-node": "^1.20.1"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "cn.picflow.imageManager",
+    "productName": "PicFlow 图片管家",
+    "copyright": "Copyright © 2026 PicFlow",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "scanner.js",
+      "db.js",
+      "ai.js",
+      "preload.js",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "model",
+        "to": "model"
+      }
+    ],
+    "asarUnpack": [
+      "node_modules/onnxruntime-node/**",
+      "node_modules/onnxruntime-common/**"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "PicFlow 图片管家",
+      "uninstallDisplayName": "PicFlow 图片管家"
+    }
+  },
+  "dependencies": {
+    "onnxruntime-node": "^1.20.1"
+  }
+}

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'">
+<title>PicFlow 图片管家</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="side-head">
+      <div class="logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg>
+      </div>
+      <div class="app-name">PicFlow <span>图片管家</span></div>
+    </div>
+    <nav id="nav"></nav>
+    <div class="side-foot"><span class="dot">●</span> 本地数据库 · 数据仅存于本机</div>
+  </aside>
+
+  <div id="right">
+    <header id="topbar">
+      <button id="btn-menu" class="icon-btn" title="收起 / 展开侧栏">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <div id="crumb"></div>
+      <div class="tb-spacer"></div>
+      <button id="btn-nsfw" class="pill toggle-nsfw" title="切换 NSFW 显隐">● NSFW 已隐藏</button>
+      <input id="search" type="text" placeholder="搜索文件名、标签、备注…">
+      <span id="status-pill" class="pill">…</span>
+      <button id="btn-guide" class="icon-btn" title="使用引导">?</button>
+      <button id="btn-scan" class="btn-primary">扫描文件夹</button>
+    </header>
+    <div id="progress" class="hidden"><div id="progress-bar"></div></div>
+    <main id="content">
+      <div id="view-head"></div>
+      <div id="dup-root" class="hidden"></div>
+      <div id="grid"></div>
+      <div id="empty-state" class="hidden"></div>
+    </main>
+  </div>
+</div>
+
+<div id="selbar" class="hidden">
+  <button id="sb-clear" class="sb-x" title="取消选择">✕</button>
+  <span id="sb-count">已选 0 张</span>
+  <span class="sb-sep"></span>
+  <button class="chip star-chip" data-act="star">★ 星标</button>
+  <button class="chip nsfw-chip" data-act="nsfw">🔞 标记 NSFW</button>
+  <button class="chip" data-act="tag">标签</button>
+  <button class="chip" data-act="album">相册</button>
+  <button class="chip" data-act="move">移动…</button>
+  <button class="chip" data-act="rename">重命名</button>
+  <button class="chip danger" data-act="trash">移出</button>
+  <button class="chip hidden" data-act="unalbum">移出相册</button>
+  <button class="chip hidden" data-act="revive">恢复到图库</button>
+  <button class="chip hidden" data-act="clearrec">清除记录</button>
+</div>
+
+<div id="lightbox" class="hidden">
+  <div class="lb-stage"><img id="lb-img" alt=""></div>
+  <aside id="lb-panel"></aside>
+  <button id="lb-prev" class="lb-arrow" title="上一张 (←)">‹</button>
+  <button id="lb-next" class="lb-arrow" title="下一张 (→)">›</button>
+  <button id="lb-close" class="lb-close" title="关闭 (Esc)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  <div id="lb-hint" class="lb-hint">← → 切换 · 点击空白关闭 · Esc 退出预览</div>
+</div>
+
+<div id="hint-bar">单击 预览 · Ctrl+点击 多选 · Shift+点击 范围选择 · Space 看大图 · Del 移出</div>
+
+<div id="modal-root"></div>
+<div id="toast-root"></div>
+<script src="app.js"></script>
+</body>
+</html>

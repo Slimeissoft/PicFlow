@@ -1,0 +1,42 @@
+# ============ 依赖 ============
+# npm install 自己装，不进 git
+node_modules/
+package-lock.json.bak
+
+# ============ 构建产物 ============
+# electron-builder 输出（含 131MB 安装包，绝不进 git）
+release/
+dist/
+out/
+
+# ============ 缓存与日志 ============
+*.log
+trash-debug.log
+.cache/
+.electron-cache/
+%LOCALAPPDATA%/electron-builder/
+
+# ============ IDE / 编辑器 ============
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ============ 操作系统 ============
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============ WorkBuddy 项目记忆（不公开）============
+.workbuddy/
+
+# ============ 用户数据（保险起见，即使不在项目目录）============
+library.json
+thumbs/
+picflow-data/
+
+# ============ 临时文件 ============
+*.tmp
+*.bak
+*.orig
