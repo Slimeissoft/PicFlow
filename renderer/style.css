@@ -91,6 +91,15 @@ body {
 .nav-sub .cnt { margin-left: auto; color: var(--muted); font-size: 12px; }
 .nav-sub.empty { color: var(--muted); cursor: default; }
 .nav-sub.empty:hover { background: none; }
+/* 拍摄日期年份折叠行 */
+.nav-sub.year-toggle { padding-left: 14px; color: #3c4148; font-weight: 600; }
+.nav-sub.year-toggle .tri { display: inline-block; width: 12px; color: var(--muted); font-size: 10px; transition: transform .15s; }
+/* 区块折叠头（拍摄日期/文件类型/智能分类） */
+.nav-item.head.sec-toggle { cursor: pointer; }
+.nav-item.head.sec-toggle .tri { display: inline-block; width: 12px; color: var(--muted); font-size: 10px; margin-right: 1px; }
+.nav-item.head.sec-toggle:hover { background: #f2f3f5; border-radius: 8px; }
+/* 侧边栏 emoji 图标（NSFW 专区） */
+.nav-emoji { font-size: 14px; line-height: 1; flex-shrink: 0; }
 
 .side-foot {
   padding: 11px 16px; font-size: 11px; color: var(--muted);
@@ -171,6 +180,11 @@ body {
 .card:hover .check { background: rgba(20,22,26,.42); }
 .card.selected { outline-color: var(--accent); }
 .card.selected .check { background: var(--accent); border-color: #fff; color: #fff; }
+/* 圆圈只在多选模式显示（v1.2.0）：浏览模式点图即预览，不被圆圈干扰 */
+#grid .card .check { display: none; }
+#grid.multi .card .check { display: flex; }
+/* 多选模式按钮激活态 */
+#btn-multi.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .card .hovermeta {
   position: absolute; left: 0; right: 0; bottom: 0;
   padding: 18px 9px 7px; color: #fff; font-size: 11px;
@@ -242,12 +256,15 @@ body {
 .lb-arrow {
   position: absolute; top: 50%; transform: translateY(-50%);
   width: 40px; height: 40px; border-radius: 50%; border: none;
-  background: rgba(255,255,255,.14); color: #fff; font-size: 22px; cursor: pointer;
+  background: rgba(20, 22, 26, .6); color: #fff; font-size: 22px; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 1px 6px rgba(0,0,0,.35);
+  z-index: 5;
 }
-.lb-arrow:hover { background: rgba(255,255,255,.28); }
+.lb-arrow:hover { background: rgba(20, 22, 26, .82); }
 #lb-prev { left: 14px; }
-#lb-next { right: 14px; }
+/* 右箭头放在信息面板(300px)左侧的深色区域，避免白底白字看不见 */
+#lb-next { right: 314px; }
 .lb-arrow.lb-x { top: 16px; right: 16px; transform: none; width: 34px; height: 34px; font-size: 15px; }
 
 /* 大号高对比灯箱关闭按钮 */
@@ -411,6 +428,8 @@ body {
   border-radius: 8px; cursor: pointer;
 }
 .check-list label:hover { background: #f5f6f7; }
+.check-list label svg { width: 15px; height: 15px; flex-shrink: 0; color: var(--muted); }
+.check-list label span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rename-preview {
   border: 1px solid var(--border); border-radius: 9px; padding: 8px 11px;
   max-height: 150px; overflow-y: auto; font-size: 12px; color: #4b5563; line-height: 1.8;

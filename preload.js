@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('api', {
   deleteAlbum: id => ipcRenderer.invoke('delete-album', id),
   renameAlbum: (id, name) => ipcRenderer.invoke('rename-album', id, name),
   addToAlbum: (id, paths) => ipcRenderer.invoke('add-to-album', id, paths),
+  assignAlbum: (id, paths) => ipcRenderer.invoke('assign-album', id, paths),
   removeFromAlbum: (id, paths) => ipcRenderer.invoke('remove-from-album', id, paths),
   renameFiles: pairs => ipcRenderer.invoke('rename-files', pairs),
   moveFiles: (paths, dest) => ipcRenderer.invoke('move-files', paths, dest),

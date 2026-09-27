@@ -6,6 +6,7 @@ package-lock.json.bak
 # ============ 构建产物 ============
 # electron-builder 输出（含 131MB 安装包，绝不进 git）
 release/
+release-*/
 dist/
 out/
 

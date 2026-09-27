@@ -107,6 +107,22 @@ module.exports = {
     a.paths = [...s];
     save();
   },
+  // 独占式归属：把 paths 加入目标相册，并从其他所有相册移除（一张图只属一个相册）
+  assignAlbum(id, paths) {
+    load();
+    const a = data.albums.find(x => x.id === id);
+    if (!a) return;
+    const set = new Set(paths);
+    for (const al of data.albums) {
+      if (al.id === id) continue;
+      if (!(al.paths || []).length) continue;
+      al.paths = al.paths.filter(p => !set.has(p));
+    }
+    const s = new Set(a.paths || []);
+    for (const p of paths) s.add(p);
+    a.paths = [...s];
+    save();
+  },
   removeFromAlbum(id, paths) {
     const a = load().albums.find(x => x.id === id);
     if (!a) return;

@@ -46,7 +46,12 @@ function createWindow() {
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  createWindow();
+  // 文件夹自动同步：启动后 3 秒扫描一次已登记文件夹，之后每 5 分钟静默重扫
+  setTimeout(autoSyncFolders, 3000);
+  setInterval(autoSyncFolders, 5 * 60 * 1000);
+});
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', () => DB.flushSync());
 
@@ -82,7 +87,8 @@ async function processFile(f) {
   const st = await fsp.stat(f);
   const existing = DB.getImage(f);
   if (existing && existing.phash && existing.mtime === st.mtimeMs && existing.size === st.size) {
-    if (existing.trashed || existing.missing) DB.revive(f);
+    // 文件回来了只解除 missing；软删除（trashed）保持不动，同步不得复活已删除图片
+    if (existing.missing && !existing.trashed) DB.revive(f);
     return null;
   }
   const fh = await fsp.open(f, 'r');
@@ -113,7 +119,7 @@ async function processFile(f) {
     nsfw: (existing && existing.nsfw) || false,
     aiCategory: (existing && existing.aiCategory) || null,
     addedAt: (existing && existing.addedAt) || Date.now(),
-    trashed: false, missing: false
+    trashed: !!(existing && existing.trashed), missing: false
   };
 }
 
@@ -129,24 +135,26 @@ ipcMain.handle('pick-move-dest', async () => {
   return r.canceled ? null : r.filePaths[0];
 });
 
-ipcMain.handle('scan-folder', async (e, folder) => {
+/* 扫描核心：手动扫描（带进度事件）与自动同步（静默）共用 */
+async function scanFolderCore(folder, opts = {}) {
+  const silent = !!opts.silent;
   if (scanning) return { busy: true };
   scanning = true;
-  send('scan:start', { folder });
+  if (!silent) send('scan:start', { folder });
   try {
     const files = walkImages(folder);
-    send('scan:total', { total: files.length });
-    let done = 0;
+    if (!silent) send('scan:total', { total: files.length });
+    let done = 0, added = 0;
     const queue = files.slice();
     const worker = async () => {
       while (queue.length) {
         const f = queue.shift();
         try {
           const rec = await processFile(f);
-          if (rec) { DB.upsertImage(rec); send('scan:item', rec); }
+          if (rec) { DB.upsertImage(rec); if (!rec.trashed) added++; if (!silent) send('scan:item', rec); }
         } catch (err) { console.error('process failed:', f, err.message); }
         done++;
-        if (done % 3 === 0 || done === files.length) send('scan:progress', { done, total: files.length });
+        if (!silent && (done % 3 === 0 || done === files.length)) send('scan:progress', { done, total: files.length });
       }
     };
     await Promise.all(Array.from({ length: 4 }, worker));
@@ -163,10 +171,29 @@ ipcMain.handle('scan-folder', async (e, folder) => {
     }
     DB.addFolder(folder);
     DB.flushSync();
-    send('scan:done', { folder, total: files.length, missing: missingCount });
-    return { ok: true, total: files.length };
+    if (!silent) send('scan:done', { folder, total: files.length, missing: missingCount });
+    return { ok: true, total: files.length, added, missing: missingCount };
   } finally { scanning = false; }
-});
+}
+
+ipcMain.handle('scan-folder', async (e, folder) => scanFolderCore(folder));
+
+/* 自动同步：静默重扫所有已登记文件夹，内容有变化才通知前端刷新，不打扰浏览 */
+async function autoSyncFolders() {
+  if (scanning || aiRunning) return;
+  const folders = DB.getFolders();
+  if (!folders.length) return;
+  let added = 0, changed = 0;
+  for (const f of folders) {
+    if (scanning) break;
+    try {
+      const r = await scanFolderCore(f, { silent: true });
+      added += r.added || 0;
+      changed += r.missing || 0;
+    } catch (err) { console.error('auto sync failed:', f, err.message); }
+  }
+  if (added > 0 || changed > 0) send('sync:done', { added, missing: changed });
+}
 
 ipcMain.handle('get-library', async () => ({
   images: DB.getImages(),
@@ -493,6 +520,8 @@ ipcMain.handle('create-album', (e, name) => DB.createAlbum(String(name).trim() |
 ipcMain.handle('delete-album', (e, id) => { DB.deleteAlbum(id); DB.flushSync(); return { ok: true }; });
 ipcMain.handle('rename-album', (e, id, name) => { DB.renameAlbum(id, String(name).trim()); DB.flushSync(); return { ok: true }; });
 ipcMain.handle('add-to-album', (e, id, paths) => { DB.addToAlbum(id, paths); DB.flushSync(); return { ok: true }; });
+// 独占式加入：一张图只属一个相册，加入时自动从其他相册移除
+ipcMain.handle('assign-album', (e, id, paths) => { DB.assignAlbum(id, paths); DB.flushSync(); return { ok: true }; });
 ipcMain.handle('remove-from-album', (e, id, paths) => { DB.removeFromAlbum(id, paths); DB.flushSync(); return { ok: true }; });
 
 ipcMain.handle('open-in-folder', (e, p) => { shell.showItemInFolder(p); return { ok: true }; });

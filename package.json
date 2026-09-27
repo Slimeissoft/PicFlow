@@ -1,7 +1,7 @@
 {
   "name": "picflow",
   "productName": "PicFlow 图片管家",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "本地图片整理与管理桌面应用",
   "main": "main.js",
   "author": "PicFlow",

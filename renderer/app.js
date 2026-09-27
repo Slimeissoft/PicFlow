@@ -49,6 +49,9 @@ const state = {
   view: { type: 'all', key: null },
   search: '',
   selected: new Set(),
+  multi: false,
+  collapsedYears: null, // Set：已折叠的年份；首次渲染只展开最新一年
+  collapsedSections: null, // Set：已折叠的区块（date/ftype/aicat）；默认全部收起
   size: 168,
   items: [],
   lbIndex: -1,
@@ -97,11 +100,12 @@ async function loadThumb(p, imgEl) {
 /* ================= 数据视图 ================= */
 function currentItems() {
   const v = state.view;
-  const nsfwHidden = state.flags.nsfwHidden !== false;
+  const nsfwMode = state.flags.nsfwMode || (state.flags.nsfwHidden === false ? 'shown' : 'hidden');
   const base = i => !i.trashed && !i.missing;
   let list;
   if (v.type === 'all') list = state.images.filter(i => base(i));
   else if (v.type === 'star') list = state.images.filter(i => base(i) && i.starred);
+  else if (v.type === 'nsfw') list = state.images.filter(i => base(i) && i.nsfw);
   else if (v.type === 'date') list = state.images.filter(i => base(i) && monthOf(i) === v.key);
   else if (v.type === 'ftype') list = state.images.filter(i => base(i) && i.type === v.key);
   else if (v.type === 'aicat') list = state.images.filter(i => base(i) && i.aiCategory === v.key);
@@ -112,8 +116,11 @@ function currentItems() {
   } else if (v.type === 'trash') list = state.images.filter(i => i.trashed || i.missing);
   else list = [];
 
-  // NSFW 隐藏模式：除回收站外，过滤掉标记为 NSFW 的图片
-  if (nsfwHidden && v.type !== 'trash') list = list.filter(i => !i.nsfw);
+  // NSFW 模式：hidden 隐藏 / shown 全部显示 / only 仅看 NSFW（回收站与 NSFW 专区视图不受影响）
+  if (v.type !== 'trash' && v.type !== 'nsfw') {
+    if (nsfwMode === 'hidden') list = list.filter(i => !i.nsfw);
+    else if (nsfwMode === 'only') list = list.filter(i => i.nsfw);
+  }
 
   if (state.search) {
     const q = state.search.toLowerCase();
@@ -158,29 +165,54 @@ function renderSidebar() {
   h += `<div class="nav-sec">图库</div>`;
   h += `<div class="nav-item${act('all', null)}" data-type="all">${ICONS.grid}<span class="lbl">全部图片</span>${cnt(items.length)}</div>`;
   h += `<div class="nav-item${act('star', null)}" data-type="star">${ICONS.star}<span class="lbl">星标</span>${starN ? cnt(starN) : ''}</div>`;
+  h += `<div class="nav-item${act('nsfw', null)}" data-type="nsfw"><span class="nav-emoji">🔞</span><span class="lbl">NSFW 专区</span>${nsfwN ? cnt(nsfwN) : ''}</div>`;
 
   h += `<div class="nav-sec">分类</div>`;
+  // 三个区块整体可折叠：点区块标题行收起/展开，默认全部收起
+  if (!state.collapsedSections) state.collapsedSections = new Set(['date', 'ftype', 'aicat']);
+  const secOpen = s => !state.collapsedSections.has(s);
+  const tri = o => `<span class="tri">${o ? '▾' : '▸'}</span>`;
   h += `<div class="nav-group">
-    <div class="nav-item head">${ICONS.calendar}<span class="lbl">拍摄日期</span></div>
-    ${dates.length ? dates.map(([k, n]) =>
-      `<div class="nav-sub${act('date', k)}" data-type="date" data-key="${k}"><span class="lbl">${k.slice(0, 4)}年${+k.slice(5, 7)}月</span>${cnt(n)}</div>`).join('')
-      : '<div class="nav-sub empty">暂无数据</div>'}
-  </div>`;
+    <div class="nav-item head sec-toggle${secOpen('date') ? ' open' : ''}" data-sec="date">${ICONS.calendar}<span class="lbl">${tri(secOpen('date'))} 拍摄日期</span></div>`;
+  if (secOpen('date')) {
+    // 按年分组可折叠：首次只展开最新一年，点年份行折叠/展开
+    const byYear = new Map();
+    for (const [k, n] of dates) {
+      const y = k.slice(0, 4);
+      if (!byYear.has(y)) byYear.set(y, []);
+      byYear.get(y).push([k, n]);
+    }
+    if (!state.collapsedYears) {
+      state.collapsedYears = new Set();
+      const ys = [...byYear.keys()];
+      for (const y of ys.slice(1)) state.collapsedYears.add(y); // 除最新年外默认折叠
+    }
+    if (dates.length) {
+      for (const [y, months] of byYear) {
+        const collapsed = state.collapsedYears.has(y);
+        const yN = months.reduce((s, [, n]) => s + n, 0);
+        h += `<div class="nav-sub year-toggle${collapsed ? '' : ' open'}" data-year="${y}"><span class="lbl"><span class="tri">${collapsed ? '▸' : '▾'}</span> ${y}年</span>${cnt(yN)}</div>`;
+        if (!collapsed) h += months.map(([k, n]) =>
+          `<div class="nav-sub${act('date', k)}" data-type="date" data-key="${k}"><span class="lbl">${+k.slice(5, 7)}月</span>${cnt(n)}</div>`).join('');
+      }
+    } else h += '<div class="nav-sub empty">暂无数据</div>';
+  }
+  h += `</div>`;
   h += `<div class="nav-group">
-    <div class="nav-item head">${ICONS.file}<span class="lbl">文件类型</span></div>
-    ${types.length ? types.map(([k, n]) =>
+    <div class="nav-item head sec-toggle${secOpen('ftype') ? ' open' : ''}" data-sec="ftype">${ICONS.file}<span class="lbl">${tri(secOpen('ftype'))} 文件类型</span></div>
+    ${secOpen('ftype') ? (types.length ? types.map(([k, n]) =>
       `<div class="nav-sub${act('ftype', k)}" data-type="ftype" data-key="${esc(k)}"><span class="lbl">${esc(k)}</span>${cnt(n)}</div>`).join('')
-      : '<div class="nav-sub empty">暂无数据</div>'}
+      : '<div class="nav-sub empty">暂无数据</div>') : ''}
   </div>`;
   h += `<div class="nav-group">
-    <div class="nav-item head">${ICONS.ai}<span class="lbl">智能分类</span></div>
-    ${classified ? AI_CATS.filter(c => aiMap.has(c)).map(c => {
+    <div class="nav-item head sec-toggle${secOpen('aicat') ? ' open' : ''}" data-sec="aicat">${ICONS.ai}<span class="lbl">${tri(secOpen('aicat'))} 智能分类</span></div>
+    ${secOpen('aicat') ? ((classified ? AI_CATS.filter(c => aiMap.has(c)).map(c => {
         const n = aiMap.get(c);
         return `<div class="nav-sub${act('aicat', c)}" data-type="aicat" data-key="${esc(c)}"><span class="lbl">${esc(c)}</span>${cnt(n)}</div>`;
       }).join('')
-      : '<div class="nav-sub empty">尚未分类</div>'}
+      : '<div class="nav-sub empty">尚未分类</div>') + `
     <div class="nav-sub ai-run${state.aiRunning ? ' busy' : ''}" id="ai-run">${ICONS.play}<span class="lbl">${state.aiRunning ? `分类中 ${state.aiDone}/${state.aiTotal}` : '运行 AI 分类'}</span></div>
-    ${state.aiError ? `<div class="nav-sub empty" title="${esc(state.aiError)}">${esc(state.aiError)}</div>` : ''}
+    ${state.aiError ? `<div class="nav-sub empty" title="${esc(state.aiError)}">${esc(state.aiError)}</div>` : ''}`) : ''}
   </div>`;
 
   h += `<div class="nav-sec">相册 <button id="btn-new-album" class="mini-btn" title="新建相册">＋</button></div>`;
@@ -203,6 +235,22 @@ function renderSidebar() {
 $('#nav').addEventListener('click', e => {
   if (e.target.closest('#btn-new-album')) { newAlbumModal(); return; }
   if (e.target.closest('#ai-run')) { runAiClassify(); return; }
+  const sec = e.target.closest('.sec-toggle');
+  if (sec) {
+    const s = sec.dataset.sec;
+    if (state.collapsedSections.has(s)) state.collapsedSections.delete(s);
+    else state.collapsedSections.add(s);
+    renderSidebar();
+    return;
+  }
+  const yr = e.target.closest('.year-toggle');
+  if (yr) {
+    const y = yr.dataset.year;
+    if (state.collapsedYears.has(y)) state.collapsedYears.delete(y);
+    else state.collapsedYears.add(y);
+    renderSidebar();
+    return;
+  }
   const el = e.target.closest('[data-type]');
   if (!el || el.classList.contains('head')) return;
   state.view = { type: el.dataset.type, key: el.dataset.key || null };
@@ -216,6 +264,7 @@ function viewTitle() {
   const v = state.view;
   if (v.type === 'all') return '全部图片';
   if (v.type === 'star') return '星标';
+  if (v.type === 'nsfw') return 'NSFW 专区';
   if (v.type === 'date') return `${v.key.slice(0, 4)}年${+v.key.slice(5, 7)}月`;
   if (v.type === 'ftype') return `${v.key} 图片`;
   if (v.type === 'aicat') return v.key;
@@ -306,7 +355,7 @@ function updateEmptyState(items) {
       <ol>
         <li><b>导入</b> — 点击「扫描文件夹」，选择存放图片的目录（自动包含子文件夹）</li>
         <li><b>浏览</b> — 图片按拍摄日期、文件类型自动分类，左侧栏切换视图</li>
-        <li><b>整理</b> — 单击看大图，勾选后批量打标签、建相册、重命名、移动、删除</li>
+        <li><b>整理</b> — 单击看大图；点右上「多选」后点击图片直接选中，可批量打标签、建相册、重命名、移动、删除</li>
       </ol>
       <p class="muted">「重复 / 相似」视图可一键清理重复图片；搜索框支持文件名、标签与备注。</p>
       <div class="empty-actions">
@@ -398,6 +447,11 @@ $('#grid').addEventListener('click', e => {
   const p = card.dataset.path;
   if (e.target.closest('.star')) { toggleStar(p); return; }
   if (e.target.closest('.check')) { toggleSelect(p); state.lastIdx = idx; return; }
+  /* 多选模式：点图即选中（Shift 范围选），不开预览 */
+  if (state.multi) {
+    if (e.shiftKey && state.lastIdx >= 0) { rangeSelect(state.lastIdx, idx); return; }
+    toggleSelect(p); state.lastIdx = idx; return;
+  }
   if (e.shiftKey && state.lastIdx >= 0) { rangeSelect(state.lastIdx, idx); return; }
   if (e.ctrlKey || e.metaKey) { toggleSelect(p); state.lastIdx = idx; return; }
   openLightbox(idx);
@@ -770,31 +824,36 @@ function aicatModal() {
   };
 }
 
-/* 加入相册 */
+/* 加入相册（独占式：一张图只属一个相册） */
 function albumModal() {
   const paths = [...state.selected];
   if (!paths.length) return;
   const ov = showModal(`<h3>将 ${paths.length} 张图片加入相册</h3>
-    <div class="row"><label class="f-label">勾选目标相册</label>
+    <div class="row"><label class="f-label">选择目标相册</label>
     <div class="check-list">${state.albums.length
-      ? state.albums.map(a => `<label><input type="checkbox" value="${a.id}">${ICONS.album}<span>${esc(a.name)}</span><span class="cnt" style="margin-left:auto;color:var(--muted);font-size:11px">${(a.paths || []).length} 张</span></label>`).join('')
+      ? state.albums.map(a => `<label><input type="radio" name="ab-target" value="${a.id}">${ICONS.album}<span>${esc(a.name)}</span><span class="cnt" style="margin-left:auto;color:var(--muted);font-size:11px">${(a.paths || []).length} 张</span></label>`).join('')
       : '<div class="hint">还没有相册，先在下方创建一个吧。</div>'}</div></div>
     <div class="row"><label class="f-label">或新建相册</label><input type="text" id="ab-new" placeholder="新相册名称"></div>
+    <p class="hint" style="margin-top:8px">一张图片只属于一个相册：加入后，这些图片会自动从其他相册移出。</p>
     <div class="modal-foot"><button class="chip" id="ab-cancel">取消</button><button class="btn-primary" id="ab-ok">加入</button></div>`);
   ov.querySelector('#ab-cancel').onclick = () => ov.remove();
   ov.querySelector('#ab-ok').onclick = async () => {
-    const ids = [...ov.querySelectorAll('.check-list input:checked')].map(c => c.value);
+    const picked = ov.querySelector('.check-list input:checked');
     const newName = ov.querySelector('#ab-new').value.trim();
-    let added = 0;
+    let targetId = null;
     if (newName) {
       const a = await api.createAlbum(newName);
-      await api.addToAlbum(a.id, paths);
-      added += paths.length;
+      targetId = a.id;
+    } else if (picked) {
+      targetId = picked.value;
     }
-    for (const id of ids) { await api.addToAlbum(id, paths); added += paths.length; }
+    if (!targetId) { toast('请先勾选一个相册，或在下方新建'); return; }
+    await api.assignAlbum(targetId, paths);
     ov.remove();
+    state.selected.clear();
+    syncSelectionUI();
     await refreshLibrary();
-    toast(added ? `已加入相册（共 ${added} 项）` : '未选择相册');
+    toast(`已将 ${paths.length} 张图片加入相册`);
   };
 }
 async function removeFromCurrentAlbum() {
@@ -962,7 +1021,7 @@ function showGuide() {
     <div class="g-step"><span class="g-num">1</span><div><b>导入图片</b>
       <p>点击右上角「扫描文件夹」，选择存放图片的目录。PicFlow 会自动扫描所有子文件夹中的 JPG / PNG / WebP / GIF / BMP 图片，并生成缩略图缓存。</p></div></div>
     <div class="g-step"><span class="g-num">2</span><div><b>浏览与智能分类</b>
-      <p>图片按拍摄日期（优先 EXIF）与文件类型自动归类。左侧「智能分类」可点击 <b>运行 AI 分类</b>，应用内置的轻量模型（MobileNet，完全离线）会把图片自动归入 <b>角色图 / 风景图 / 插画·CG / 动物·萌宠 / 物品·道具 / 美食 / 其他</b>。顶部搜索框支持文件名、标签、备注关键词。</p></div></div>
+      <p>图片按拍摄日期（优先 EXIF）与文件类型自动归类。左侧「智能分类」可点击 <b>运行 AI 分类</b>，应用内置的轻量模型（MobileNet，完全离线）会把图片自动归入 <b>角色图 / 风景图 / 插画·CG / 动物·萌宠 / 物品·道具 / 美食 / 截图 / 其他</b>，分错的可在图片详情面板手动纠正。顶部搜索框支持文件名、标签、备注关键词；已扫描的文件夹有新图时会自动同步进图库。</p></div></div>
     <div class="g-step"><span class="g-num">3</span><div><b>星标与 NSFW</b>
       <p>悬停缩略图点右上角 <b>★</b> 加星标；NSFW 图片可手动标记（缩略图右下角红角标）。顶部 <b>NSFW 已隐藏</b> 开关一键隐藏/显示所有 NSFW 图片。</p></div></div>
     <div class="g-step"><span class="g-num">4</span><div><b>整理与预览</b>
@@ -1005,19 +1064,35 @@ document.addEventListener('keydown', e => {
 $('#btn-scan').onclick = startScan;
 $('#btn-guide').onclick = showGuide;
 $('#btn-menu').onclick = () => $('#sidebar').classList.toggle('collapsed');
+/* 多选模式开关：开启后点图即选中，圆圈显示；退出时清空选择 */
+$('#btn-multi').onclick = () => {
+  state.multi = !state.multi;
+  const btn = $('#btn-multi');
+  btn.classList.toggle('on', state.multi);
+  btn.textContent = state.multi ? '✓ 完成选择' : '☑ 多选';
+  $('#grid').classList.toggle('multi', state.multi);
+  $('#hint-bar').textContent = state.multi
+    ? '点击图片 选中/取消 · Shift+点击 范围选择 · 选好后用底部操作条批量处理 · 点「完成选择」退出'
+    : '单击 预览 · 开启右上「多选」后点击图片直接选中 · Ctrl+A 全选 · Del 移出';
+  if (!state.multi) { state.selected.clear(); syncSelectionUI(); }
+};
 $('#btn-nsfw').onclick = () => {
-  const hidden = state.flags.nsfwHidden !== false;
-  state.flags.nsfwHidden = !hidden;
-  api.setFlag('nsfwHidden', state.flags.nsfwHidden);
+  // 三态循环：隐藏 → 显示全部 → 仅看 NSFW
+  const cur = state.flags.nsfwMode || (state.flags.nsfwHidden === false ? 'shown' : 'hidden');
+  const next = cur === 'hidden' ? 'shown' : (cur === 'shown' ? 'only' : 'hidden');
+  state.flags.nsfwMode = next;
+  api.setFlag('nsfwMode', next);
   syncNsfwButton();
   renderSidebar();
   renderContent();
 };
 function syncNsfwButton() {
-  const hidden = state.flags.nsfwHidden !== false;
+  const mode = state.flags.nsfwMode || (state.flags.nsfwHidden === false ? 'shown' : 'hidden');
   const btn = $('#btn-nsfw');
-  btn.classList.toggle('show', !hidden);
-  btn.innerHTML = hidden ? '● NSFW 已隐藏' : '● NSFW 显示中';
+  btn.classList.toggle('show', mode !== 'hidden');
+  btn.innerHTML = mode === 'hidden' ? '● NSFW 已隐藏'
+    : mode === 'shown' ? '● NSFW 显示中'
+    : '🔞 仅看 NSFW';
 }
 let searchTimer = null;
 $('#search').addEventListener('input', e => {
@@ -1072,6 +1147,14 @@ async function runAiClassify() {
   updatePill();
   if (!state.flags.guided && state.images.filter(live).length === 0) showGuide();
 
+  /* 文件夹自动同步：后台静默扫描发现变化后通知 */
+  api.on('sync:done', async d => {
+    const parts = [];
+    if (d.added) parts.push(`新增/更新 ${d.added} 张`);
+    if (d.missing) parts.push(`${d.missing} 张已在外部移动或删除`);
+    if (parts.length) toast(`图库已自动同步：${parts.join('，')}`);
+    await refreshLibrary();
+  });
   api.on('scan:start', d => { state.scanning = true; state.scanDone = 0; state.scanTotal = 0; updatePill(); });
   api.on('scan:total', d => { state.scanTotal = d.total; updatePill(); });
   api.on('scan:progress', d => {
