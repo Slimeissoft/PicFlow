@@ -1,7 +1,7 @@
 'use strict';
 // 必须在最早期设置：主进程 I/O 线程池太小会让批量缩略图读盘排队（默认 4）
 process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || '16';
-const { app, BrowserWindow, ipcMain, dialog, shell, nativeImage, utilityProcess, protocol } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, nativeImage, protocol } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const fsp = require('fs/promises');
@@ -24,13 +24,6 @@ let win = null;
 let scanning = false;
 let aiRunning = false;
 let aiCancel = false;
-let wdWorker = null;      // WD14 推理子进程
-let wdWorkerSeq = 0;      // 请求序号
-let wdWorkerPending = new Map(); // id → {resolve, timer}
-
-const modelDir = () => app.isPackaged
-  ? path.join(process.resourcesPath, 'model')
-  : path.join(__dirname, 'model');
 
 const MIME = {
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
@@ -77,6 +70,7 @@ app.whenReady().then(() => {
     }
   });
   createWindow();
+  setupAutoUpdater();
   // 文件夹自动同步：启动后 8 秒（避开首屏加载的磁盘/IO 竞争），之后每 5 分钟静默重扫
   setTimeout(autoSyncFolders, 8000);
   setInterval(autoSyncFolders, 5 * 60 * 1000);
@@ -603,6 +597,11 @@ ipcMain.handle('open-in-folder', (e, p) => { shell.showItemInFolder(p); return {
 ipcMain.handle('set-flag', (e, k, v) => { DB.setFlag(k, v); return { ok: true }; });
 
 /* ---------------- AI 智能分类（本地离线推理） ---------------- */
+/* ---------------- AI 智能分类（云端多模态大模型） ----------------
+ * v1.4 起本地识别模型（MobileNetV2 / WD14）全部移除：
+ *   角色/作品识别改由用户自己的多模态大模型 API 完成（见 cloudai.js）。
+ * 隐私：每张图先用本地 nsfwjs 判定，命中 NSFW 的绝不上传，只在本地打标记。
+ */
 
 /** 获取一张图的缩略图 nativeImage（优先复用磁盘缓存） */
 async function thumbImageOf(im) {
@@ -619,296 +618,227 @@ async function thumbImageOf(im) {
   try { return nativeImage.createFromPath(tp); } catch { return null; }
 }
 
-ipcMain.handle('ai-status', async () => ({ running: aiRunning, modelDir: modelDir() }));
-
-/* ---------------- WD14 子进程管理 ----------------
- * WD14 推理（model.onnx，934MB）在独立进程执行：
- * 主进程只做原生级图片预处理（createThumbnailFromPath，毫秒级），
- * 推理数秒~数十秒不阻塞 UI，取消=kills 立即生效。
- */
-function stopWd14Worker() {
-  if (wdWorker) {
-    try { wdWorker.kill(); } catch {}
-    wdWorker = null;
+/** 图片 → 云端 dataURL：缩到长边 1024 的 JPEG（平衡识别质量与传输成本） */
+async function imageDataUrlForCloud(im, maxSide = 1024, quality = 85) {
+  let img = null;
+  try {
+    img = await nativeImage.createThumbnailFromPath(im.path, { width: maxSide, height: maxSide });
+  } catch {}
+  if (!img || img.isEmpty()) img = nativeImage.createFromPath(im.path);
+  if (!img || img.isEmpty()) return null;
+  const sz = img.getSize();
+  const scale = Math.min(maxSide / sz.width, maxSide / sz.height, 1);
+  if (scale < 1) {
+    img = img.resize({
+      width: Math.max(1, Math.round(sz.width * scale)),
+      height: Math.max(1, Math.round(sz.height * scale)),
+      quality: 'good'
+    });
   }
-  for (const [, p] of wdWorkerPending) { try { p.resolve(null); } catch {} }
-  wdWorkerPending.clear();
+  const jpeg = img.toJPEG(quality);
+  return 'data:image/jpeg;base64,' + jpeg.toString('base64');
 }
 
-/** 启动 worker 并等模型加载完成（返回 {ok, ep} 或 {ok:false, error}） */
-function startWd14Worker() {
-  return new Promise(resolve => {
-    let settled = false;
-    const done = v => { if (!settled) { settled = true; resolve(v); } };
-    try {
-      // worker 脚本在 asarUnpack 列表中：打包后需指向 app.asar.unpacked 的真实文件
-      // （utilityProcess.fork 不支持 asar 内脚本直启）；dev 模式路径不含 app.asar，原样可用
-      const workerPath = path.join(__dirname, 'wd14-worker.js');
-      const forkPath = workerPath.includes('app.asar')
-        ? workerPath.replace('app.asar', 'app.asar.unpacked')
-        : workerPath;
-      const w = utilityProcess.fork(forkPath, [], {
-        // V8 堆上限 512MB：JS 层再膨胀也不会撑爆内存（模型的 native 内存另计）
-        execArgv: ['--max-old-space-size=512']
-      });
-      wdWorker = w;
-      w.on('message', msg => {
-        if (!msg) return;
-        if (msg.type === 'ready') { done({ ok: true, ep: msg.ep, kind: msg.kind, loadMs: msg.loadMs }); return; }
-        if (msg.type === 'init-error') { done({ ok: false, error: msg.error }); return; }
-        if (msg.type === 'result') {
-          const p = wdWorkerPending.get(msg.id);
-          if (p) {
-            wdWorkerPending.delete(msg.id);
-            clearTimeout(p.timer);
-            p.resolve(msg.ok ? msg.data : null);
-          }
-        }
-      });
-      w.on('exit', () => {
-        wdWorker = null;
-        done({ ok: false, error: 'worker 进程退出' });
-        for (const [, p] of wdWorkerPending) { clearTimeout(p.timer); p.resolve(null); }
-        wdWorkerPending.clear();
-      });
-      w.postMessage({ type: 'init', modelDir: modelDir() });
-      // 模型加载最坏 3 分钟（934MB 从磁盘读 + 初始化）
-      setTimeout(() => done({ ok: false, error: 'WD14 模型加载超时' }), 180000);
-    } catch (e) {
-      done({ ok: false, error: String(e.message || e) });
-    }
-  });
-}
-
-/** 单张推理（带超时保护；失败/超时返回 null，不阻塞整批） */
-function wd14Classify(input, timeoutMs = 120000) {
-  return new Promise(resolve => {
-    if (!wdWorker) { resolve(null); return; }
-    const id = ++wdWorkerSeq;
-    const timer = setTimeout(() => {
-      wdWorkerPending.delete(id);
-      console.warn('[WD14] 单张推理超时, 跳过');
-      resolve(null);
-    }, timeoutMs);
-    wdWorkerPending.set(id, { resolve, timer });
-    try {
-      wdWorker.postMessage({ type: 'classify', id, width: input.width, height: input.height, bgra: input.bgra });
-    } catch (e) {
-      clearTimeout(timer);
-      wdWorkerPending.delete(id);
-      resolve(null);
-    }
-  });
-}
+ipcMain.handle('ai-status', async () => ({ running: aiRunning }));
 
 ipcMain.handle('ai-classify-all', async (e, opts) => {
   if (aiRunning) return { busy: true };
-  const redo = opts && opts.redo;
-  const runNsfw = opts && opts.nsfw !== false;
+  const redo = !!(opts && opts.redo);
+  const runNsfw = !opts || opts.nsfw !== false;
+  const cfg = DB.getFlags().cloudAI || {};
+  if (!cfg.baseURL || !cfg.apiKey || !cfg.model) {
+    return { ok: false, error: '还没有配置 AI 接口：点侧栏「AI 设置」填入服务商、API 地址、Key 和模型名' };
+  }
+
   aiRunning = true; aiCancel = false;
-  send('ai:start', {});
+  send('ai:start', { cloud: true });
   const t0 = Date.now();
   try {
-    // MobileNetV2（未识别图的 fallback 聚类用；模型仅几 MB）
-    await AI.ensure(modelDir());
-    const targets = DB.getImages().filter(i => !i.trashed && !i.missing && !i.aiManual && (redo || !i.aiCluster));
+    // 增量优先：默认只处理"还没有云端分类结果"的图；redo 才全量重跑
+    let targets = DB.getImages().filter(i => !i.trashed && !i.missing && !i.aiManual);
+    if (!redo) targets = targets.filter(i => !(i.aiCategory && i.aiCloud));
     const total = targets.length;
-    send('ai:total', { total });
+    send('ai:total', { total, cloud: true });
+    if (!total) {
+      send('ai:done', { done: 0, ok: 0, canceled: false });
+      return { ok: true, done: 0 };
+    }
 
-    // 启动 WD14 子进程（模型缺失时自动降级为纯 MobileNetV2 聚类）
-    send('ai:progress', { done: 0, total: total || 1, phase: 'loading' });
-    const wdReady = await startWd14Worker();
-    if (!wdReady.ok) console.warn('[AI] WD14 不可用, 降级 MobileNetV2 聚类:', wdReady.error);
-    send('ai:ep', {
-      ep: wdReady.ok ? wdReady.ep : null,
-      kind: wdReady.ok ? wdReady.kind : null,
-      loadMs: wdReady.loadMs || 0
-    });
-
-    // nsfw 模型按需加载：只有存在"尚未检测过"的图时才加载 tfjs（省内存/省下载）
+    // NSFW 模型按需加载（已有检测结果的图不重复跑）
     const needNsfw = runNsfw && targets.some(t => !t.nsfwScore);
     if (needNsfw) { try { await AI.ensureNsfw(); } catch {} }
 
-    const wdResults = [];        // WD14 认出角色/作品
-    const unrecognized = [];     // 未识别 → 走聚类
-    const nsfwMap = {};          // path → nsfw 结果（未识别图结果由聚类结果合并时带回）
+    const results = [];
+    let doneN = 0;
+    const queue = targets.slice();
+    const CONCURRENCY = Math.max(1, Math.min(5, Number(cfg.concurrency) || 3));
 
-    // === 主循环：逐张（内存峰值 = 单张，不驻留全部图） ===
-    for (let i = 0; i < targets.length; i++) {
-      if (aiCancel) break;
-      const t = targets[i];
-      let wdData = null;
-      if (wdReady.ok) {
+    const work = async () => {
+      while (queue.length && !aiCancel) {
+        const t = queue.shift();
+        if (!t) break;
+        let nsfwRes = null;
         try {
-          // 原生缩略图 API：不整图解码进内存，亚秒级
-          let img = null;
-          try {
-            img = await nativeImage.createThumbnailFromPath(t.path, { width: 1024, height: 1024 });
-          } catch {}
-          if (!img || img.isEmpty()) img = nativeImage.createFromPath(t.path);
-          const input = AI.prepareWd14Input(img);
-          if (input) wdData = await wd14Classify(input);
-        } catch (err) { console.warn('[WD14] 单张失败:', t.path, err.message); }
+          // 1) 本地 NSFW 判定（已有结果直接复用）
+          if (runNsfw) {
+            if (t.nsfwScore) nsfwRes = { scores: t.nsfwScore, isNsfw: !!t.nsfw };
+            else if (AI.nsfwAvailable()) {
+              try {
+                const timg = await thumbImageOf(t);
+                if (timg && !timg.isEmpty()) nsfwRes = await AI.detectNsfw(timg);
+              } catch {}
+            }
+          }
+          // 2) NSFW 图绝不上网
+          if (nsfwRes && nsfwRes.isNsfw) {
+            results.push({ path: t.path, nsfw: nsfwRes, skipped: 'nsfw' });
+          } else {
+            const dataUrl = await imageDataUrlForCloud(t);
+            if (!dataUrl) {
+              results.push({ path: t.path, error: '图片读取失败', nsfw: nsfwRes });
+            } else {
+              const cloudRes = await CloudAI.classifyImageCloud({ imageDataUrl: dataUrl, config: cfg });
+              results.push({ path: t.path, cloud: cloudRes, nsfw: nsfwRes });
+            }
+          }
+        } catch (err2) {
+          results.push({ path: t.path, error: err2.message || String(err2), nsfw: nsfwRes });
+        }
+        doneN++;
+        send('ai:progress', { done: doneN, total, phase: 'cloud' });
       }
+    };
 
-      // NSFW 检测（缩略图，轻量）；已有检测结果的图直接复用，不重复推理
-      let nsfwRes = null;
-      if (runNsfw && t.nsfwScore) {
-        // 已有分数：直接还原结果结构（isNsfw 用已存标记）
-        nsfwRes = { scores: t.nsfwScore, isNsfw: !!t.nsfw };
-      } else if (runNsfw && AI.nsfwAvailable()) {
-        try {
-          const timg = await thumbImageOf(t);
-          if (timg && !timg.isEmpty()) nsfwRes = await AI.detectNsfw(timg);
-        } catch {}
-      }
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, targets.length) }, () => work()));
 
-      if (wdData && wdData.category) {
-        wdResults.push({ path: t.path, clusterName: wdData.category, top: wdData.top, nsfw: nsfwRes });
-      } else {
-        unrecognized.push(t.path);
-        if (nsfwRes) nsfwMap[t.path] = nsfwRes;
-      }
-      send('ai:progress', { done: i + 1, total, phase: 'wd14' });
-    }
-
-    // === 未识别图 → MobileNetV2 特征聚类 ===
-    let mnResults = [];
-    if (unrecognized.length && !aiCancel) {
-      const imgOf = async p => { const rec = DB.getImage(p); return rec ? thumbImageOf(rec) : null; };
-      mnResults = await AI.mnCluster(unrecognized, imgOf,
-        p => send('ai:progress', { done: p.done, total: p.total, phase: p.phase }));
-      for (const r of mnResults) r.nsfw = nsfwMap[r.path] || null;
-    }
-
-    const results = [...wdResults, ...mnResults];
-
-    // === 写 DB ===
+    // 3) 写库
+    let okN = 0, nsfwN = 0, failN = 0;
     for (const r of results) {
-      const patch = {
-        aiCluster: r.cluster,
-        aiClusterName: r.clusterName,
-        aiCategory: r.clusterName, // 兼容旧字段：侧边栏用 aiCategory 显示
-        aiConf: null,
-        aiTop: r.top
-      };
-      if (r.nsfw && r.nsfw.isNsfw) {
-        patch.nsfw = true;
-        patch.nsfwScore = r.nsfw.scores;
+      if (r.error) { failN++; continue; }
+      if (r.skipped === 'nsfw') {
+        nsfwN++;
+        DB.updateImage(r.path, { nsfw: true, nsfwScore: r.nsfw.scores });
+        continue;
       }
-      DB.updateImage(r.path, patch);
+      if (r.cloud) {
+        okN++;
+        DB.updateImage(r.path, {
+          aiCategory: r.cloud.category,
+          aiClusterName: r.cloud.category,
+          aiCluster: null,
+          aiCloud: true,
+          aiConf: null,
+          aiTop: r.cloud.tags || [],
+          aiDesc: r.cloud.desc || ''
+        });
+      }
+      if (r.nsfw && r.nsfw.isNsfw) DB.updateImage(r.path, { nsfw: true, nsfwScore: r.nsfw.scores });
     }
     DB.flushSync();
-    const clusterCount = new Set(results.map(r => String(r.clusterName))).size;
     send('ai:done', {
-      done: results.length, ok: results.length, canceled: aiCancel,
-      clusters: clusterCount,
-      wdCount: wdResults.length, mnCount: mnResults.length,
+      done: results.length,
+      ok: okN,
+      nsfwSkipped: nsfwN,
+      failed: failN,
+      canceled: aiCancel,
+      clusters: new Set(results.filter(r => r.cloud).map(r => r.cloud.category)).size,
       elapsedMs: Date.now() - t0
     });
-    return { ok: true, done: results.length };
+    return { ok: true, done: results.length, okN, nsfwN, failN };
   } catch (err) {
     console.error('ai classify error:', err);
     send('ai:done', { error: err.message });
     return { ok: false, error: err.message };
   } finally {
     aiRunning = false;
-    stopWd14Worker();
   }
 });
 
-ipcMain.handle('ai-stop', async () => {
-  aiCancel = true;
-  stopWd14Worker(); // 立即杀掉推理进程，取消即时生效
-  return { ok: true };
-});
+ipcMain.handle('ai-stop', async () => { aiCancel = true; return { ok: true }; });
 
-/* ---------------- 云端精确识别（NSFW 本地过滤后联网） ----------------
- * 安全策略：NSFW 图绝不上网。
- *   1. 对每张图先调本地 nsfwjs（DB 里已有 nsfw 标记的直接用）
- *   2. 判定为 NSFW 的 → 跳过云端，保持本地聚类分类
- *   3. 判定为非 NSFW 的 → 发云端大模型识别游戏名/角色名/类型
- *   4. 用云端结果覆盖 aiCategory，标记 aiCloud=true
- * 配置存 DB.flags.cloudAI = { baseURL, apiKey, model }
- */
+/* ---------------- 云端配置 ---------------- */
 ipcMain.handle('cloud-config-get', async () => DB.getFlags().cloudAI || {});
 ipcMain.handle('cloud-config-set', async (e, cfg) => { DB.setFlag('cloudAI', cfg || {}); return { ok: true }; });
-ipcMain.handle('cloud-config-test', async (e, cfg) => {
-  const r = await CloudAI.testConfig(cfg);
-  return r;
-});
+ipcMain.handle('cloud-config-test', async (e, cfg) => CloudAI.testConfig(cfg));
+ipcMain.handle('cloud-providers', async () => CloudAI.PROVIDERS);
 
-ipcMain.handle('cloud-classify', async (e, opts) => {
-  if (aiRunning) return { busy: true };
-  const cfg = DB.getFlags().cloudAI || {};
-  if (!cfg.baseURL || !cfg.apiKey) return { ok: false, error: '未配置云端 API，请先在「云端设置」中填写 baseURL 和 apiKey' };
-  aiRunning = true; aiCancel = false;
-  send('ai:start', { cloud: true });
-  try {
-    await AI.ensure(modelDir());
-    // 目标：所有非 trashed/missing 的图（用户可勾选"只识别未分类的"）
-    const redo = opts && opts.redo;
-    let targets = DB.getImages().filter(i => !i.trashed && !i.missing);
-    if (!redo) targets = targets.filter(i => !i.aiCloud);
-    const total = targets.length;
-    send('ai:total', { total, cloud: true });
-
-    let done = 0, okN = 0, nsfwSkip = 0, failN = 0;
-    for (let i = 0; i < targets.length; i++) {
-      if (aiCancel) break;
-      const im = targets[i];
-      try {
-        // ① 本地 NSFW 检测：已有标记用之，否则现场检测
-        let isNsfw = !!im.nsfw;
-        if (!isNsfw && im.nsfw === undefined || im.nsfw === null) {
-          await AI.ensureNsfw();
-          if (AI.nsfwAvailable()) {
-            const img = await thumbImageOf(im);
-            if (img && !img.isEmpty()) {
-              const r = await AI.detectNsfw(img);
-              if (r && r.isNsfw) {
-                isNsfw = true;
-                DB.updateImage(im.path, { nsfw: true, nsfwScore: r.scores });
-              }
-            }
-          }
-        }
-        // ② NSFW → 跳过云端，绝不上网
-        if (isNsfw) { nsfwSkip++; done++; send('ai:progress', { done, total, phase: 'cloud', skip: nsfwSkip }); continue; }
-
-        // ③ 非 NSFW → 发云端识别
-        const img = await thumbImageOf(im);
-        if (!img || img.isEmpty()) { failN++; done++; send('ai:progress', { done, total, phase: 'cloud' }); continue; }
-        // 用缩略图 base64 发云端（省流量，440px JPEG ~30KB）
-        const buf = await (async () => {
-          const st = await fsp.stat(im.path);
-          const tp = await thumbPathFor(im.path, st);
-          try { await fsp.access(tp); } catch { await ensureThumb(im.path, img, st); }
-          return await fsp.readFile(tp);
-        })();
-        const dataUrl = 'data:image/jpeg;base64,' + buf.toString('base64');
-        const r = await CloudAI.classifyImageCloud({ imageDataUrl: dataUrl, config: cfg });
-        // ④ 写入 DB
-        DB.updateImage(im.path, {
-          aiCategory: r.category,
-          aiClusterName: r.category,
-          aiCloud: true,
-          aiCloudInfo: { type: r.type, game: r.game, character: r.character, desc: r.desc }
-        });
-        okN++;
-      } catch (err) {
-        console.warn('[Cloud] 识别失败:', im.path, err.message);
-        failN++;
-      }
-      done++;
-      send('ai:progress', { done, total, phase: 'cloud', ok: okN, skip: nsfwSkip });
+/* ---------------- 批量标注分类 ----------------
+ * 用户像数据标注一样手动给图片指定分类（aiManual=true，AI 不再覆盖）。
+ * 传空 category 表示清除手动分类标记。
+ */
+ipcMain.handle('batch-set-category', async (e, paths, category) => {
+  const list = Array.isArray(paths) ? paths : [];
+  const v = String(category || '').trim();
+  for (const p of list) {
+    if (v) {
+      DB.updateImage(p, { aiCategory: v, aiClusterName: v, aiManual: true, aiConf: null });
+    } else {
+      DB.updateImage(p, { aiCategory: '', aiClusterName: '', aiManual: false, aiConf: null });
     }
-    DB.flushSync();
-    send('ai:done', { done: okN, ok: okN, skip: nsfwSkip, fail: failN, canceled: aiCancel, cloud: true });
-    return { ok: true, done: okN, skip: nsfwSkip, fail: failN };
-  } catch (err) {
-    console.error('cloud classify error:', err);
-    send('ai:done', { error: err.message, cloud: true });
-    return { ok: false, error: err.message };
-  } finally { aiRunning = false; }
+  }
+  DB.flushSync();
+  return { ok: true, count: list.length };
 });
+
+/* ---------------- 自动更新（GitHub Releases） ----------------
+ * electron-updater 读取 Release 中的 latest.yml 判断新版本，
+ * 下载 NSIS 更新包，重启后自动安装。
+ * 仅打包版生效（dev 模式不检查）。
+ */
+const { autoUpdater } = require('electron-updater');
+
+function setupAutoUpdater() {
+  if (!app.isPackaged) return;
+  autoUpdater.autoDownload = false;          // 先提示，用户点下载才下（避免偷跑流量）
+  autoUpdater.autoInstallOnAppQuit = true;   // 下载完成后退出时自动装
+  autoUpdater.allowPrerelease = false;
+
+  autoUpdater.on('checking-for-update', () => send('update:status', { state: 'checking' }));
+  autoUpdater.on('update-available', info => send('update:status', {
+    state: 'available',
+    version: info.version,
+    releaseNotes: typeof info.releaseNotes === 'string' ? info.releaseNotes.slice(0, 2000) : '',
+    releaseDate: info.releaseDate || ''
+  }));
+  autoUpdater.on('update-not-available', info => send('update:status', {
+    state: 'latest',
+    version: (info && info.version) || app.getVersion()
+  }));
+  autoUpdater.on('download-progress', p => send('update:progress', {
+    percent: Math.round(p.percent || 0),
+    transferred: p.transferred || 0,
+    total: p.total || 0,
+    bytesPerSecond: p.bytesPerSecond || 0
+  }));
+  autoUpdater.on('update-downloaded', info => send('update:status', {
+    state: 'downloaded',
+    version: info.version
+  }));
+  autoUpdater.on('error', err => send('update:status', {
+    state: 'error',
+    error: String((err && err.message) || err).slice(0, 200)
+  }));
+
+  // 启动 8 秒后静默检查一次（等首屏加载完）
+  setTimeout(() => { autoUpdater.checkForUpdates().catch(() => {}); }, 8000);
+}
+
+ipcMain.handle('update-check', async () => {
+  if (!app.isPackaged) return { ok: false, error: '开发模式下不检查更新' };
+  try {
+    const r = await autoUpdater.checkForUpdates();
+    return { ok: true, version: r && r.updateInfo && r.updateInfo.version };
+  } catch (e) {
+    return { ok: false, error: String(e.message || e) };
+  }
+});
+ipcMain.handle('update-download', async () => {
+  try { await autoUpdater.downloadUpdate(); return { ok: true }; }
+  catch (e) { return { ok: false, error: String(e.message || e) }; }
+});
+ipcMain.handle('update-install', async () => {
+  setImmediate(() => { try { autoUpdater.quitAndInstall(); } catch (e) { console.error('install err', e); } });
+  return { ok: true };
+});
+ipcMain.handle('app-version', async () => app.getVersion());
+

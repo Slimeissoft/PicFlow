@@ -72,8 +72,6 @@ const state = {
   dupStale: true,
   aiRunning: false, aiDone: 0, aiTotal: 0, aiError: ''
 };
-// AI 分类：不再预设固定类别，聚类后动态生成组名
-const AI_CATS = []; // 兼容引用，实际从数据动态生成
 const byPath = new Map();
 function dynamicCats() {
   const s = new Set();
@@ -296,7 +294,7 @@ function renderContent() {
   head += `<div class="head-actions">`;
   if (v.type === 'album') head += `<button class="chip" id="btn-album-rename">重命名</button><button class="chip danger" id="btn-album-del">删除相册</button>`;
   if (v.type === 'trash') head += `<button class="chip danger" id="btn-clear-rec">清除全部记录</button>`;
-  if (v.type !== 'trash' && v.type !== 'dup' && v.type !== 'aicat') head += `<button class="chip" id="btn-ai-head" title="用本地 AI 模型自动归类">⚡ AI 分类</button><button class="chip" id="btn-cloud-head" title="本地 NSFW 过滤后，联网精确识别游戏名/角色名（需配置 API key）">☁ 云端识别</button>`;
+  if (v.type !== 'trash' && v.type !== 'dup' && v.type !== 'aicat') head += `<button class="chip" id="btn-ai-head" title="调用你配置的多模态大模型 API 识别图片">⚡ AI 识别</button>`;
   head += `<button class="chip" id="btn-selall">全选</button>
     <div class="slider-wrap">${ICONS.zoomOut}<input id="thumb-size" type="range" min="110" max="300" value="${state.size}" title="缩略图大小">${ICONS.zoomIn}</div>
   </div>`;
@@ -305,8 +303,6 @@ function renderContent() {
   $('#btn-selall').onclick = selectAll;
   const aiHead = $('#btn-ai-head');
   if (aiHead) aiHead.onclick = runAiClassify;
-  const cloudHead = $('#btn-cloud-head');
-  if (cloudHead) cloudHead.onclick = runCloudClassify;
   $('#thumb-size').oninput = e => {
     state.size = +e.target.value;
     document.documentElement.style.setProperty('--cell', state.size + 'px');
@@ -583,7 +579,7 @@ $('#selbar').addEventListener('click', e => {
     if (act === 'star') batchStar();
     else if (act === 'nsfw') batchNsfw();
     else if (act === 'tag') tagModal();
-    else if (act === 'aicat') aicatModal();
+    else if (act === 'aicat') categoryModal();
     else if (act === 'album') albumModal();
     else if (act === 'move') moveSelected();
     else if (act === 'rename') renameModal();
@@ -753,8 +749,24 @@ async function openLightbox(idx) {
 }
 function closeLightbox() {
   $('#lightbox').classList.add('hidden');
+  $('#lightbox').classList.remove('fullscreen');
+  if (document.fullscreenElement) { try { document.exitFullscreen(); } catch (e) {} }
   $('#lb-img').src = '';
   state.lbIndex = -1;
+}
+/* 全屏查看：图片铺满窗口（按钮 / 双击图片 / F 键触发） */
+function toggleLightboxFullscreen() {
+  const lb = $('#lightbox');
+  if (lb.classList.contains('hidden')) return;
+  const on = lb.classList.toggle('fullscreen');
+  if (on) {
+    if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+      document.documentElement.requestFullscreen().catch(() => {});
+    }
+    toast('全屏查看（按 F 或双击图片退出全屏）', 2000);
+  } else {
+    if (document.fullscreenElement) { try { document.exitFullscreen(); } catch (e) {} }
+  }
 }
 function lbNav(d) {
   const n = state.items.length;
@@ -872,6 +884,12 @@ function renderLbPanel(it) {
 $('#lb-prev').onclick = () => lbNav(-1);
 $('#lb-next').onclick = () => lbNav(1);
 $('#lb-close').onclick = closeLightbox;
+/* 全屏：按钮 / 双击图片 / F 键 */
+$('#lb-full').onclick = toggleLightboxFullscreen;
+$('#lb-img').addEventListener('dblclick', toggleLightboxFullscreen);
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement) $('#lightbox').classList.remove('fullscreen');
+});
 /* 点击图片以外的空白处关闭灯箱 */
 $('#lightbox').addEventListener('mousedown', e => {
   if (e.target === $('#lightbox') || e.target.classList.contains('lb-stage') || e.target.id === 'lb-hint') closeLightbox();
@@ -978,34 +996,6 @@ function tagModal() {
   ov.querySelector('#tg-done').onclick = () => { ov.remove(); refreshLibrary(); };
 }
 
-/* 批量改分类 */
-function aicatModal() {
-  const paths = [...state.selected];
-  if (!paths.length) return;
-  const ov = showModal(`<h3>批量改分类（${paths.length} 张）</h3>
-    <div class="row"><label class="f-label">选择分类</label>
-      <select id="ac-sel" class="lb-select">
-        <option value="">未分类（清除）</option>
-        ${AI_CATS.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}
-      </select></div>
-    <div class="modal-foot"><button class="chip" id="ac-cancel">取消</button>
-    <button class="btn-primary" id="ac-ok">应用</button></div>`);
-  ov.querySelector('#ac-cancel').onclick = () => ov.remove();
-  ov.querySelector('#ac-ok').onclick = async () => {
-    const v = ov.querySelector('#ac-sel').value;
-    ov.remove();
-    for (const p of paths) {
-      const im = byPath.get(p);
-      if (im) { im.aiCategory = v || null; im.aiManual = !!v; im.aiConf = null; }
-      await api.updateImage(p, { aiCategory: v });
-    }
-    state.selected.clear();
-    syncSelectionUI();
-    renderGrid();
-    renderSidebar();
-    toast(v ? `已将 ${paths.length} 张改为「${v}」` : `已清除 ${paths.length} 张的分类`);
-  };
-}
 
 /* 加入相册（独占式：一张图只属一个相册） */
 function albumModal() {
@@ -1254,6 +1244,7 @@ document.addEventListener('keydown', e => {
   if (!$('#lightbox').classList.contains('hidden')) {
     if (e.key === 'ArrowLeft') lbNav(-1);
     if (e.key === 'ArrowRight') lbNav(1);
+    if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleLightboxFullscreen(); }
     if (state.lbIndex >= 0 && state.items[state.lbIndex]) {
       const it = state.items[state.lbIndex];
       if (e.key === 's' || e.key === 'S') { e.preventDefault(); toggleStar(it.path).then(() => renderLbPanel(it)); }
@@ -1330,22 +1321,28 @@ function scheduleGrid() {
   }, 400);
 }
 
-/* ================= AI 智能分类 ================= */
+/* ================= AI 分类（云端多模态大模型） ================= */
 async function runAiClassify() {
   if (state.aiRunning) return;
+  const cfg = state.flags.cloudAI || {};
+  if (!cfg.baseURL || !cfg.apiKey || !cfg.model) {
+    const go = await confirmModal(
+      '需要先配置 AI 接口',
+      'AI 识别使用你自己的多模态大模型 API（OpenAI / Claude / DeepSeek / 通义千问 / Kimi / 豆包 / 硅基流动等）。\n\n图片识别会产生少量 API 费用，由你的账号承担。\n\n现在去配置吗？',
+      '去配置'
+    );
+    if (go) cloudConfigModal();
+    return;
+  }
 
-  // 增量优先：只识别"还没有分类结果"的图（新导入/手动清除过分类的）。
-  // 之前代码硬编码 redo:true，每次都全量重跑所有图——300 张就要一两个小时，
-  // 这是"识别非常慢"的主因。现在：
-  //   有未识别的图 → 只跑这些（通常几张，秒级完成）
-  //   全部已识别   → 弹窗询问是否全部重跑（用户明确要求才全量）
+  // 增量优先：只处理还没有分类结果的图；全部已分类才询问是否全量重跑
   const candidates = state.images.filter(i => !i.trashed && !i.missing && !i.aiManual);
-  const pending = candidates.filter(i => !i.aiCluster).length;
+  const pending = candidates.filter(i => !i.aiCategory).length;
   let redo = false;
   if (candidates.length && pending === 0) {
     const ok = await confirmModal(
       '全部重跑 AI 分类',
-      `当前 ${candidates.length} 张图都已有分类结果，没有待识别的新图。\n\n全部重跑会重新识别所有图片，速度较慢（约每张 20-30 秒）。\n如果只是想让新导入的图归类，直接点「取消」即可——下次会自动只处理新图。`,
+      `当前 ${candidates.length} 张图都已有分类结果，没有待识别的图。\n\n全部重跑会重新调用 API 识别所有图片（消耗额度）。如果只是想让新导入的图归类，点「取消」即可。`,
       '全部重跑', true
     );
     if (!ok) return;
@@ -1367,89 +1364,142 @@ async function runAiClassify() {
   }
 }
 
-/* ================= 云端精确识别 ================= */
-
-/* 云端 API 设置弹窗：baseURL + apiKey + model + 测试连接 */
-function cloudConfigModal() {
+/* ================= AI 设置（服务商预设 + 自定义） ================= */
+let _providersCache = null;
+async function cloudConfigModal() {
   const cfg = state.flags.cloudAI || {};
-  const ov = showModal(`<h3>云端识别设置</h3>
+  if (!_providersCache) {
+    try { _providersCache = await api.cloudProviders(); } catch (e) { _providersCache = {}; }
+  }
+  const providers = _providersCache;
+  const cur = cfg.provider && providers[cfg.provider] ? cfg.provider : 'openai';
+  const ov = showModal(`<h3>AI 设置</h3>
     <div class="row">
-      <label class="f-label">API 地址 (baseURL)</label>
+      <label class="f-label">服务商</label>
+      <select id="cc-provider" class="lb-select" style="width:100%">
+        ${Object.entries(providers).map(([k, v]) => `<option value="${k}"${k === cur ? ' selected' : ''}>${esc(v.label)}</option>`).join('')}
+      </select>
+      <div class="hint" id="cc-hint"></div>
+    </div>
+    <div class="row">
+      <label class="f-label">API 地址</label>
       <input type="text" id="cc-base" placeholder="https://api.openai.com/v1" value="${esc(cfg.baseURL || '')}">
-      <div class="hint">OpenAI 官方填 https://api.openai.com/v1；国内兼容服务（豆包/通义/Kimi/DeepSeek/硅基流动等）填服务商给的地址，需支持 /chat/completions</div>
     </div>
     <div class="row">
       <label class="f-label">API Key</label>
-      <input type="text" id="cc-key" placeholder="sk-..." value="${esc(cfg.apiKey || '')}">
-      <div class="hint">密钥只存在本地 library.json，不上传 PicFlow 服务器</div>
+      <input type="password" id="cc-key" placeholder="sk-..." value="${esc(cfg.apiKey || '')}">
+      <div class="hint">只保存在本机 library.json，不会上传到任何服务器</div>
     </div>
     <div class="row">
       <label class="f-label">模型名</label>
-      <input type="text" id="cc-model" placeholder="gpt-4o" value="${esc(cfg.model || '')}">
-      <div class="hint">需支持图片识别的多模态模型。OpenAI: gpt-4o / gpt-4o-mini；国内按服务商文档填</div>
+      <input type="text" id="cc-model" placeholder="gpt-4o-mini" value="${esc(cfg.model || '')}">
+      <div class="hint">必须支持图片输入（多模态模型）</div>
+    </div>
+    <div class="row">
+      <label class="f-label">并发数</label>
+      <input type="number" id="cc-conc" min="1" max="5" value="${esc(String(cfg.concurrency || 3))}">
+      <div class="hint">同时识别几张，越高越快；遇到限流（429）就调低</div>
     </div>
     <div class="hint" style="background:var(--accent-soft);border-radius:8px;padding:10px 12px;margin-top:8px;line-height:1.7">
-      <b>安全策略：</b>NSFW 图片先由本地 nsfwjs 检测，判定为 NSFW 的<b>绝不上网</b>，只有确认非 NSFW 的图才发云端识别。
+      <b>隐私：</b>每张图先在本地做 NSFW 检测，命中 NSFW 的图片<b>绝不上传</b>；只有正常图片才发到你配置的 API。
     </div>
     <div class="modal-foot">
       <button class="chip" id="cc-cancel">取消</button>
       <button class="chip" id="cc-test">测试连接</button>
       <button class="btn-primary" id="cc-save">保存</button>
     </div>`);
+
+  const pSel = ov.querySelector('#cc-provider');
+  const baseIn = ov.querySelector('#cc-base');
+  const keyIn = ov.querySelector('#cc-key');
+  const modelIn = ov.querySelector('#cc-model');
+  const hintEl = ov.querySelector('#cc-hint');
+
+  const applyProvider = (k, force) => {
+    const p = providers[k];
+    if (!p) return;
+    hintEl.textContent = p.hint || '';
+    if (force) {
+      if (p.baseURL) baseIn.value = p.baseURL;
+      if (p.model) modelIn.value = p.model;
+    }
+  };
+  if (!cfg.baseURL) applyProvider(cur, true);
+  else hintEl.textContent = (providers[cur] && providers[cur].hint) || '';
+  pSel.onchange = () => applyProvider(pSel.value, true);
+
+  const collect = () => ({
+    provider: pSel.value,
+    api: (providers[pSel.value] && providers[pSel.value].api) || 'openai',
+    baseURL: baseIn.value.trim(),
+    apiKey: keyIn.value.trim(),
+    model: modelIn.value.trim(),
+    concurrency: Math.max(1, Math.min(5, Number(ov.querySelector('#cc-conc').value) || 3))
+  });
+
   ov.querySelector('#cc-cancel').onclick = () => ov.remove();
   ov.querySelector('#cc-test').onclick = async () => {
     const t = ov.querySelector('#cc-test');
+    const c = collect();
+    if (!c.baseURL || !c.apiKey) { toast('请先填 API 地址和 Key'); return; }
     t.textContent = '测试中…'; t.disabled = true;
-    const c = { baseURL: $('#cc-base').value.trim(), apiKey: $('#cc-key').value.trim(), model: $('#cc-model').value.trim() };
     const r = await api.cloudConfigTest(c);
     t.textContent = '测试连接'; t.disabled = false;
-    toast(r.ok ? '✓ 连接成功' : '✗ ' + r.error);
+    toast(r.ok ? '✓ 连接成功，可以开始识别' : '✗ ' + r.error, r.ok ? 2200 : 5000);
   };
   ov.querySelector('#cc-save').onclick = async () => {
-    const c = { baseURL: $('#cc-base').value.trim(), apiKey: $('#cc-key').value.trim(), model: $('#cc-model').value.trim() };
-    if (!c.baseURL || !c.apiKey) { toast('请填写 baseURL 和 apiKey'); return; }
+    const c = collect();
+    if (!c.baseURL || !c.apiKey || !c.model) { toast('请填完整：API 地址、Key、模型名'); return; }
     await api.cloudConfigSet(c);
     state.flags.cloudAI = c;
     ov.remove();
-    toast('云端设置已保存');
+    toast('AI 设置已保存');
   };
 }
 
-/* 运行云端识别：NSFW 本地过滤 → 非 NSFW 联网精确识别 */
-async function runCloudClassify() {
-  const cfg = state.flags.cloudAI || {};
-  if (!cfg.baseURL || !cfg.apiKey) {
-    toast('请先配置云端 API（点侧栏底部「云端」按钮）');
-    cloudConfigModal();
-    return;
-  }
-  if (state.aiRunning) { toast('已有 AI 任务在进行中'); return; }
-  const ok = await confirmModal('云端精确识别',
-    '将对图库中的图片进行云端识别：\n' +
-    '1. 先用本地 nsfwjs 检测，NSFW 图绝不上网\n' +
-    '2. 非 NSFW 图发送到云端大模型，识别游戏名/角色名/图片类型\n' +
-    '3. 识别结果覆盖本地分类（云端结果更精确）\n\n' +
-    '注意：会消耗 API 额度；图片越多耗时越长（每张约 1-3 秒，可随时点侧栏 AI 停止）。',
-    '开始识别', true);
-  if (!ok) return;
-  state.aiRunning = true; state.aiDone = 0; state.aiError = '';
-  renderSidebar();
-  try {
-    const r = await api.cloudClassify({ redo: true });
-    if (r && r.busy) { toast('已有 AI 任务在进行'); return; }
-    if (r && r.error) { state.aiError = r.error; toast('云端识别失败：' + r.error); }
-    else if (r && r.ok) {
-      toast(`云端识别完成：成功 ${r.done} 张` + (r.skip ? `，NSFW 跳过 ${r.skip} 张` : '') + (r.fail ? `，失败 ${r.fail} 张` : ''));
-    }
-  } catch (e) {
-    state.aiError = String(e.message || e);
-    toast('云端识别失败：' + state.aiError);
-  } finally {
-    state.aiRunning = false;
-    renderSidebar();
+/* ================= 批量标注分类（数据标注式） ================= */
+async function categoryModal() {
+  const paths = [...state.selected];
+  if (!paths.length) return;
+  const cats = [...new Set(state.images.map(i => i.aiCategory).filter(Boolean))].sort();
+  const ov = showModal(`<h3>标注分类（${paths.length} 张）</h3>
+    <p class="hint" style="margin-bottom:10px">手动指定分类后，AI 识别不会覆盖你的标注。</p>
+    <div class="row">
+      <label class="f-label">选择已有分类</label>
+      <div class="check-list">${cats.length
+        ? cats.map(c => `<label><input type="radio" name="cat-target" value="${esc(c)}"><span>${esc(c)}</span></label>`).join('')
+        : '<div class="hint">还没有分类，在下方输入新建一个</div>'}</div>
+    </div>
+    <div class="row">
+      <label class="f-label">或输入新分类</label>
+      <input type="text" id="cat-new" placeholder="例如：原神·雷电将军 / 代码截图">
+    </div>
+    <div class="modal-foot">
+      <button class="chip" id="cat-cancel">取消</button>
+      <button class="chip danger" id="cat-clear">清除标注</button>
+      <button class="btn-primary" id="cat-ok">应用</button>
+    </div>`);
+  ov.querySelector('#cat-cancel').onclick = () => ov.remove();
+  ov.querySelector('#cat-clear').onclick = async () => {
+    await api.batchSetCategory(paths, '');
+    ov.remove();
+    state.selected.clear();
     await refreshLibrary();
-  }
+    toast('已清除 ' + paths.length + ' 张的分类标注');
+  };
+  ov.querySelector('#cat-ok').onclick = async () => {
+    const newVal = ov.querySelector('#cat-new').value.trim();
+    const picked = ov.querySelector('.check-list input:checked');
+    const target = newVal || (picked ? picked.value : '');
+    if (!target) { toast('请选择分类或输入新分类名'); return; }
+    await api.batchSetCategory(paths, target);
+    ov.remove();
+    state.selected.clear();
+    await refreshLibrary();
+    toast(`已把 ${paths.length} 张标注为「${target}」`);
+  };
 }
+
 
 /* ================= 初始化 ================= */
 (async function init() {
@@ -1492,34 +1542,91 @@ async function runCloudClassify() {
     toast(`扫描完成：共 ${d.total} 张图片${d.missing ? `，${d.missing} 条记录已失效` : ''}`);
   });
 
-  api.on('ai:start', () => { state.aiRunning = true; state.aiDone = 0; state.aiPhase = 'extract'; renderSidebar(); });
+  api.on('ai:start', () => { state.aiRunning = true; state.aiDone = 0; state.aiPhase = 'cloud'; renderSidebar(); });
   api.on('ai:total', d => { state.aiTotal = d.total; renderSidebar(); });
   api.on('ai:progress', d => {
     state.aiDone = d.done; state.aiTotal = d.total;
-    state.aiPhase = d.phase || 'wd14';
-    const labels = {
-      loading: '加载', wd14: '识别', extract: '提取',
-      cluster: '聚类', nsfw: '检测'
-    };
-    state.aiPhaseLabel = labels[state.aiPhase] || '分析';
+    state.aiPhase = d.phase || 'cloud';
+    const labels = { cloud: '识别', nsfw: '检测', loading: '加载' };
+    state.aiPhaseLabel = labels[state.aiPhase] || '识别';
     renderSidebar();
-  });
-  api.on('ai:ep', d => {
-    if (d && d.ep) {
-      const kindLabel = d.kind === 'int8' ? 'INT8' : d.kind === 'fp16' ? 'FP16' : '';
-      const epLabel = d.ep === 'dml' ? 'GPU 加速' : 'CPU';
-      toast(`WD14 引擎就绪（${[kindLabel, epLabel].filter(Boolean).join(' · ')}）`, 2600);
-    }
   });
   api.on('ai:done', async d => {
     state.aiRunning = false; state.aiPhase = null; state.aiPhaseLabel = null;
-    if (d && d.error) { state.aiError = d.error; toast('AI 分析失败：' + d.error); }
+    if (d && d.error) { state.aiError = d.error; toast('AI 识别失败：' + d.error); }
     else {
       const parts = [];
-      if (d.wdCount != null) parts.push(`识别角色/作品 ${d.wdCount} 张`);
-      if (d.mnCount != null) parts.push(`聚类 ${d.mnCount} 张`);
-      toast(`AI 分析完成：${d.done || 0} 张图片分为 ${d.clusters || '?'} 组${parts.length ? '（' + parts.join('，') + '）' : ''}`, 4000);
+      if (d.ok != null) parts.push(`成功 ${d.ok} 张`);
+      if (d.nsfwSkipped) parts.push(`NSFW 跳过 ${d.nsfwSkipped} 张`);
+      if (d.failed) parts.push(`失败 ${d.failed} 张`);
+      if (d.elapsedMs) parts.push(`耗时 ${Math.round(d.elapsedMs / 1000)} 秒`);
+      toast(`AI 识别完成：${d.done || 0} 张 · ${d.clusters || 0} 个分类${parts.length ? '（' + parts.join('，') + '）' : ''}`, 5000);
     }
     await refreshLibrary();
   });
+
+  /* ---------- 自动更新提示条 ---------- */
+  const ub = $('#update-bar');
+  const ubText = $('#ub-text');
+  const ubBtn = $('#ub-action');
+  const ubProg = $('#ub-progress');
+  const ubInner = $('#ub-progress-inner');
+  let ubState = '';
+  let ubVersion = '';
+  api.on('update:status', d => {
+    if (!d) return;
+    ubState = d.state;
+    if (d.state === 'available') {
+      ubVersion = d.version || '';
+      ubText.textContent = `发现新版本 v${d.version}`;
+      ubBtn.textContent = '下载更新';
+      ubBtn.disabled = false;
+      ubProg.classList.remove('on');
+      ubInner.style.width = '0%';
+      ub.classList.remove('hidden');
+    } else if (d.state === 'downloaded') {
+      ubText.textContent = `v${d.version} 已下载完成，重启即可安装`;
+      ubBtn.textContent = '重启安装';
+      ubBtn.disabled = false;
+      ubProg.classList.remove('on');
+      ub.classList.remove('hidden');
+    } else if (d.state === 'latest') {
+      if (!ub.classList.contains('hidden') && ubState !== 'checking') {
+        ubText.textContent = '当前已是最新版本';
+        ubBtn.textContent = '关闭';
+        ubBtn.disabled = false;
+        setTimeout(() => { if (ubState === 'latest') ub.classList.add('hidden'); }, 2600);
+      }
+    } else if (d.state === 'error') {
+      ubText.textContent = '检查更新失败：' + (d.error || '').slice(0, 40);
+      ubBtn.textContent = '重试';
+      ubBtn.disabled = false;
+      ub.classList.remove('hidden');
+    }
+  });
+  api.on('update:progress', d => {
+    if (!d) return;
+    ubState = 'downloading';
+    ubProg.classList.add('on');
+    ubInner.style.width = Math.max(0, Math.min(100, d.percent || 0)) + '%';
+    const mb = n => (n / 1024 / 1024).toFixed(1);
+    ubText.textContent = `正在下载 v${ubVersion}… ${d.percent || 0}%（${mb(d.transferred || 0)}/${mb(d.total || 0)}MB）`;
+    ubBtn.textContent = '下载中…';
+    ubBtn.disabled = true;
+  });
+  $('#ub-close').onclick = () => ub.classList.add('hidden');
+  ubBtn.onclick = async () => {
+    if (ubState === 'available') {
+      ubBtn.disabled = true;
+      ubBtn.textContent = '准备下载…';
+      ubProg.classList.add('on');
+      const r = await api.updateDownload();
+      if (r && r.error) toast('下载失败：' + r.error);
+    } else if (ubState === 'downloaded') {
+      await api.updateInstall();
+    } else if (ubState === 'latest' || ubState === 'error') {
+      ub.classList.add('hidden');
+      if (ubState === 'error') api.updateCheck();
+    }
+  };
 })();

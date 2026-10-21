@@ -13,9 +13,9 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="7.5" height="7.5" rx="3"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="3"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="3"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="3"/></svg>
     </div>
     <nav id="nav"></nav>
-    <button id="btn-cloud-set" class="nav-item nav-bottom" title="云端识别设置（NSFW 本地过滤后联网精确识别游戏/角色）">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><path d="M12 12v4M12 10h.01"/></svg>
-      <span class="lbl">云端</span>
+    <button id="btn-cloud-set" class="nav-item nav-bottom" title="AI 识别设置（配置 OpenAI / Claude / DeepSeek 等大模型 API）">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <span class="lbl">AI 设置</span>
     </button>
     <button id="btn-guide" class="nav-item nav-bottom" title="使用引导">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01"/></svg>
@@ -53,7 +53,7 @@
   <button class="chip star-chip" data-act="star">★ 星标</button>
   <button class="chip nsfw-chip" data-act="nsfw">🔞 标记 NSFW</button>
   <button class="chip" data-act="tag">标签</button>
-  <button class="chip" data-act="aicat">改分类…</button>
+  <button class="chip" data-act="aicat">标注分类…</button>
   <button class="chip" data-act="album">相册</button>
   <button class="chip" data-act="move">移动…</button>
   <button class="chip" data-act="rename">重命名</button>
@@ -69,8 +69,18 @@
   <aside id="lb-panel"></aside>
   <button id="lb-prev" class="lb-arrow" title="上一张 (←)">‹</button>
   <button id="lb-next" class="lb-arrow" title="下一张 (→)">›</button>
+  <button id="lb-full" class="lb-full" title="全屏显示 (F 或双击图片)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+  </button>
   <button id="lb-close" class="lb-close" title="关闭 (Esc)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
-  <div id="lb-hint" class="lb-hint">← → 切换 · 点击空白关闭 · Esc 退出预览</div>
+  <div id="lb-hint" class="lb-hint">← → 切换 · F 或双击全屏 · 点击空白关闭 · Esc 退出</div>
+</div>
+
+<div id="update-bar" class="hidden">
+  <span id="ub-text">发现新版本</span>
+  <div id="ub-progress"><div id="ub-progress-inner"></div></div>
+  <button id="ub-action" class="ub-btn">下载更新</button>
+  <button id="ub-close" class="ub-close" title="稍后再说">✕</button>
 </div>
 
 <div id="hint-bar">单击 预览 · 开启右上「多选」后点击图片直接选中 · Ctrl+A 全选 · Del 移出</div>

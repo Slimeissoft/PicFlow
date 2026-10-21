@@ -30,6 +30,12 @@ contextBridge.exposeInMainWorld('api', {
   cloudConfigGet: () => ipcRenderer.invoke('cloud-config-get'),
   cloudConfigSet: cfg => ipcRenderer.invoke('cloud-config-set', cfg),
   cloudConfigTest: cfg => ipcRenderer.invoke('cloud-config-test', cfg),
-  cloudClassify: opts => ipcRenderer.invoke('cloud-classify', opts),
+  cloudProviders: () => ipcRenderer.invoke('cloud-providers'),
+  batchSetCategory: (paths, category) => ipcRenderer.invoke('batch-set-category', paths, category),
+  // 自动更新
+  updateCheck: () => ipcRenderer.invoke('update-check'),
+  updateDownload: () => ipcRenderer.invoke('update-download'),
+  updateInstall: () => ipcRenderer.invoke('update-install'),
+  appVersion: () => ipcRenderer.invoke('app-version'),
   on: (ch, cb) => ipcRenderer.on(ch, (e, d) => cb(d))
 });
