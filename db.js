@@ -5,6 +5,7 @@ const fs = require('fs');
 
 let data = null;
 const index = new Map();
+const ignoredSet = new Set();
 let saveTimer = null;
 
 function file() { return path.join(app.getPath('userData'), 'library.json'); }
@@ -12,14 +13,17 @@ function file() { return path.join(app.getPath('userData'), 'library.json'); }
 function load() {
   if (data) return data;
   try { data = JSON.parse(fs.readFileSync(file(), 'utf8')); } catch {
-    data = { flags: {}, folders: [], images: [], albums: [] };
+    data = { flags: {}, folders: [], images: [], albums: [], ignored: [] };
   }
   data.images = data.images || [];
   data.albums = data.albums || [];
   data.folders = data.folders || [];
   data.flags = data.flags || {};
+  data.ignored = data.ignored || [];
   index.clear();
+  ignoredSet.clear();
   for (const im of data.images) index.set(im.path, im);
+  for (const p of data.ignored) ignoredSet.add(p);
   return data;
 }
 
@@ -71,6 +75,28 @@ module.exports = {
     data.images = data.images.filter(i => !s.has(i.path));
     for (const p of s) index.delete(p);
     for (const a of data.albums) a.paths = (a.paths || []).filter(p => !s.has(p));
+    // 关键：清除记录的路径加入 ignored，防止 autoSync 重新扫描时又把这些文件加回来
+    for (const p of s) {
+      if (!ignoredSet.has(p)) { ignoredSet.add(p); data.ignored.push(p); }
+    }
+    save();
+  },
+  // 忽略列表：被"清除记录"的路径不再被自动同步加回
+  isIgnored: p => { load(); return ignoredSet.has(p); },
+  getIgnored: () => load().ignored.slice(),
+  addIgnored(paths) {
+    load();
+    let changed = false;
+    for (const p of paths) {
+      if (!ignoredSet.has(p)) { ignoredSet.add(p); data.ignored.push(p); changed = true; }
+    }
+    if (changed) save();
+  },
+  removeIgnored(paths) {
+    load();
+    const s = new Set(paths);
+    data.ignored = data.ignored.filter(p => !s.has(p));
+    for (const p of s) ignoredSet.delete(p);
     save();
   },
   updatePath(oldP, newP) {

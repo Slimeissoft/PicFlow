@@ -27,6 +27,16 @@ function imgDate(i) {
 }
 const monthOf = i => imgDate(i).slice(0, 7);
 const live = i => !i.trashed && !i.missing;
+/* 带 NSFW 模式过滤的 live：AI 总览/pill/侧栏统计都要用这个，
+ * 避免隐藏 NSFW 时 AI 分类视图还显示 NSFW 图 */
+const nsfwModeOf = () => state.flags.nsfwMode || (state.flags.nsfwHidden === false ? 'shown' : 'hidden');
+function liveVisible(i) {
+  if (!live(i)) return false;
+  const m = nsfwModeOf();
+  if (m === 'hidden') return !i.nsfw;
+  if (m === 'only') return !!i.nsfw;
+  return true;
+}
 
 const ICONS = {
   grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg>',
@@ -62,9 +72,23 @@ const state = {
   dupStale: true,
   aiRunning: false, aiDone: 0, aiTotal: 0, aiError: ''
 };
-const AI_CATS = ['角色图', '风景图', '插画·CG', '动物·萌宠', '物品·道具', '美食', '截图', '其他'];
+// AI 分类：不再预设固定类别，聚类后动态生成组名
+const AI_CATS = []; // 兼容引用，实际从数据动态生成
 const byPath = new Map();
+function dynamicCats() {
+  const s = new Set();
+  for (const i of state.images) if (i.aiClusterName) s.add(i.aiClusterName);
+  return [...s].sort();
+}
 const thumbCache = new Map();
+const THUMB_CACHE_MAX = 400; // 上限 400 条（约 15-20MB），防止浏览上千张图后无限膨胀
+function cacheThumb(p, url) {
+  if (thumbCache.size >= THUMB_CACHE_MAX) {
+    const oldest = thumbCache.keys().next().value;
+    if (oldest !== undefined) thumbCache.delete(oldest);
+  }
+  thumbCache.set(p, url);
+}
 const io = new IntersectionObserver(entries => {
   for (const en of entries) {
     if (en.isIntersecting) {
@@ -92,9 +116,32 @@ async function refreshLibrary() {
 }
 async function loadThumb(p, imgEl) {
   if (!imgEl) return;
+  // 1) 优先走自定义协议：Chromium 直接读缩略图文件（无 IPC、无 base64）
+  const it = byPath.get(p);
+  if (it && it.thumbUrl) {
+    imgEl.onerror = async () => {
+      // 缩略图文件缺失（新导入/被清理）→ 回退 IPC 触发重建
+      imgEl.onerror = null;
+      try {
+        const url = await api.getThumb(p);
+        if (url && imgEl.isConnected) { imgEl.src = url; return; }
+      } catch (e) { /* fallthrough */ }
+      const card = imgEl.closest('.card');
+      if (card) card.classList.add('file-missing');
+    };
+    imgEl.src = it.thumbUrl;
+    return;
+  }
+  // 2) 兜底：扫描过程中新记录尚无 thumbUrl，走 IPC（会顺带生成缩略图）
   if (thumbCache.has(p)) { imgEl.src = thumbCache.get(p); return; }
-  const url = await api.getThumb(p);
-  if (url && imgEl.isConnected) { thumbCache.set(p, url); imgEl.src = url; }
+  try {
+    const url = await api.getThumb(p);
+    if (url && imgEl.isConnected) { cacheThumb(p, url); imgEl.src = url; return; }
+  } catch (e) { /* fallthrough */ }
+  if (imgEl.isConnected) {
+    const card = imgEl.closest('.card');
+    if (card) card.classList.add('file-missing');
+  }
 }
 
 /* ================= 数据视图 ================= */
@@ -108,7 +155,7 @@ function currentItems() {
   else if (v.type === 'nsfw') list = state.images.filter(i => base(i) && i.nsfw);
   else if (v.type === 'date') list = state.images.filter(i => base(i) && monthOf(i) === v.key);
   else if (v.type === 'ftype') list = state.images.filter(i => base(i) && i.type === v.key);
-  else if (v.type === 'aicat') list = state.images.filter(i => base(i) && i.aiCategory === v.key);
+  else if (v.type === 'aicat') list = state.images.filter(i => base(i) && i.aiClusterName === v.key);
   else if (v.type === 'tag') list = state.images.filter(i => base(i) && (i.tags || []).includes(v.key));
   else if (v.type === 'album') {
     const a = state.albums.find(x => x.id === v.key);
@@ -134,100 +181,67 @@ function currentItems() {
   return list;
 }
 
-/* ================= 侧边栏 ================= */
+/* ================= 侧边栏（76px 窄图标栏 Illustash 风格） ================= */
 function renderSidebar() {
   const items = state.images.filter(live);
   const v = state.view;
   const act = (t, k) => (v.type === t && (v.key || null) === (k || null)) ? ' active' : '';
-  const cnt = n => `<span class="cnt">${n}</span>`;
+  const cnt = n => n ? `<span class="cnt">${n}</span>` : '';
 
   const starN = items.filter(i => i.starred).length;
   const nsfwN = items.filter(i => i.nsfw).length;
+  const trashN = state.images.filter(i => i.trashed || i.missing).length;
+  // 待识别：有图还没分类结果（增量模式下点一下只跑这些）
+  const pendingAiN = items.filter(i => !i.aiManual && !i.aiCluster).length;
+  const nsfwMode = nsfwModeOf();
 
-  const dateMap = new Map();
-  for (const i of items) { const k = monthOf(i); dateMap.set(k, (dateMap.get(k) || 0) + 1); }
-  const dates = [...dateMap.entries()].sort((a, b) => b[0].localeCompare(a[0]));
+  // AI 聚类组（动态，用于判断 ai 视图是否可用）
+  const aiMap = new Map();
+  for (const i of items) if (i.aiClusterName) aiMap.set(i.aiClusterName, (aiMap.get(i.aiClusterName) || 0) + 1);
+  const aiGroupN = aiMap.size;
+  const classifiedN = [...aiMap.values()].reduce((s, n) => s + n, 0);
 
-  const typeMap = new Map();
-  for (const i of items) typeMap.set(i.type, (typeMap.get(i.type) || 0) + 1);
-  const types = [...typeMap.entries()].sort((a, b) => b[1] - a[1]);
+  let h = '';
+  // 主导航
+  h += `<div class="nav-item${act('all', null)}" data-type="all">${ICONS.grid}<span class="lbl">图库</span>${cnt(items.length)}</div>`;
+  h += `<div class="nav-item${v.type === 'aicat' && !v.key ? ' active' : act('aicat', v.key)}" data-type="aicat" data-key="">${ICONS.ai}<span class="lbl">AI 分类</span>${cnt(classifiedN)}</div>`;
+  h += `<div class="nav-item${act('star', null)}" data-type="star">${ICONS.star}<span class="lbl">星标</span>${cnt(starN)}</div>`;
+  // NSFW 专区入口：隐藏模式下不显示（用户要求"点隐藏就把 NSFW 和专区一块藏起来"），
+  // 切到"显示全部"或"仅看 NSFW"时才出现
+  if (nsfwMode !== 'hidden') {
+    h += `<div class="nav-item${act('nsfw', null)}" data-type="nsfw"><span class="nav-emoji">🔞</span><span class="lbl">NSFW</span>${cnt(nsfwN)}</div>`;
+  }
 
+  h += `<div class="nav-sec">整理</div>`;
+  // 相册区域：包进滚动容器，避免十几个相册把侧栏塞满
+  h += `<div class="nav-albums">`;
+  if (state.albums.length) {
+    h += state.albums.map(a => `<div class="nav-item${act('album', a.id)}" data-type="album" data-key="${a.id}">${ICONS.album}<span class="lbl">${esc(a.name)}</span>${cnt((a.paths || []).length)}</div>`).join('');
+  }
+  h += `<div class="nav-item" id="btn-new-album" title="新建相册">${ICONS.album}<span class="lbl">＋相册</span></div>`;
+  h += `</div>`;
+
+  // 标签（最多展示前 8 个，其余通过图库视图筛选栏访问）
   const tagMap = new Map();
   for (const i of items) for (const t of (i.tags || [])) tagMap.set(t, (tagMap.get(t) || 0) + 1);
   const tags = [...tagMap.entries()].sort((a, b) => b[1] - a[1]);
-
-  const aiMap = new Map();
-  for (const i of items) if (i.aiCategory) aiMap.set(i.aiCategory, (aiMap.get(i.aiCategory) || 0) + 1);
-  const classified = [...aiMap.values()].reduce((s, n) => s + n, 0);
-  const trashN = state.images.filter(i => i.trashed || i.missing).length;
-
-  let h = '';
-  h += `<div class="nav-sec">图库</div>`;
-  h += `<div class="nav-item${act('all', null)}" data-type="all">${ICONS.grid}<span class="lbl">全部图片</span>${cnt(items.length)}</div>`;
-  h += `<div class="nav-item${act('star', null)}" data-type="star">${ICONS.star}<span class="lbl">星标</span>${starN ? cnt(starN) : ''}</div>`;
-  h += `<div class="nav-item${act('nsfw', null)}" data-type="nsfw"><span class="nav-emoji">🔞</span><span class="lbl">NSFW 专区</span>${nsfwN ? cnt(nsfwN) : ''}</div>`;
-
-  h += `<div class="nav-sec">分类</div>`;
-  // 三个区块整体可折叠：点区块标题行收起/展开，默认全部收起
-  if (!state.collapsedSections) state.collapsedSections = new Set(['date', 'ftype', 'aicat']);
-  const secOpen = s => !state.collapsedSections.has(s);
-  const tri = o => `<span class="tri">${o ? '▾' : '▸'}</span>`;
-  h += `<div class="nav-group">
-    <div class="nav-item head sec-toggle${secOpen('date') ? ' open' : ''}" data-sec="date">${ICONS.calendar}<span class="lbl">${tri(secOpen('date'))} 拍摄日期</span></div>`;
-  if (secOpen('date')) {
-    // 按年分组可折叠：首次只展开最新一年，点年份行折叠/展开
-    const byYear = new Map();
-    for (const [k, n] of dates) {
-      const y = k.slice(0, 4);
-      if (!byYear.has(y)) byYear.set(y, []);
-      byYear.get(y).push([k, n]);
-    }
-    if (!state.collapsedYears) {
-      state.collapsedYears = new Set();
-      const ys = [...byYear.keys()];
-      for (const y of ys.slice(1)) state.collapsedYears.add(y); // 除最新年外默认折叠
-    }
-    if (dates.length) {
-      for (const [y, months] of byYear) {
-        const collapsed = state.collapsedYears.has(y);
-        const yN = months.reduce((s, [, n]) => s + n, 0);
-        h += `<div class="nav-sub year-toggle${collapsed ? '' : ' open'}" data-year="${y}"><span class="lbl"><span class="tri">${collapsed ? '▸' : '▾'}</span> ${y}年</span>${cnt(yN)}</div>`;
-        if (!collapsed) h += months.map(([k, n]) =>
-          `<div class="nav-sub${act('date', k)}" data-type="date" data-key="${k}"><span class="lbl">${+k.slice(5, 7)}月</span>${cnt(n)}</div>`).join('');
-      }
-    } else h += '<div class="nav-sub empty">暂无数据</div>';
+  if (tags.length) {
+    h += `<div class="nav-sec">标签</div>`;
+    h += tags.slice(0, 8).map(([k, n]) => `<div class="nav-item${act('tag', k)}" data-type="tag" data-key="${esc(k)}" title="${esc(k)}">${ICONS.tag}<span class="lbl">${esc(k)}</span>${cnt(n)}</div>`).join('');
   }
-  h += `</div>`;
-  h += `<div class="nav-group">
-    <div class="nav-item head sec-toggle${secOpen('ftype') ? ' open' : ''}" data-sec="ftype">${ICONS.file}<span class="lbl">${tri(secOpen('ftype'))} 文件类型</span></div>
-    ${secOpen('ftype') ? (types.length ? types.map(([k, n]) =>
-      `<div class="nav-sub${act('ftype', k)}" data-type="ftype" data-key="${esc(k)}"><span class="lbl">${esc(k)}</span>${cnt(n)}</div>`).join('')
-      : '<div class="nav-sub empty">暂无数据</div>') : ''}
-  </div>`;
-  h += `<div class="nav-group">
-    <div class="nav-item head sec-toggle${secOpen('aicat') ? ' open' : ''}" data-sec="aicat">${ICONS.ai}<span class="lbl">${tri(secOpen('aicat'))} 智能分类</span></div>
-    ${secOpen('aicat') ? ((classified ? AI_CATS.filter(c => aiMap.has(c)).map(c => {
-        const n = aiMap.get(c);
-        return `<div class="nav-sub${act('aicat', c)}" data-type="aicat" data-key="${esc(c)}"><span class="lbl">${esc(c)}</span>${cnt(n)}</div>`;
-      }).join('')
-      : '<div class="nav-sub empty">尚未分类</div>') + `
-    <div class="nav-sub ai-run${state.aiRunning ? ' busy' : ''}" id="ai-run">${ICONS.play}<span class="lbl">${state.aiRunning ? `分类中 ${state.aiDone}/${state.aiTotal}` : '运行 AI 分类'}</span></div>
-    ${state.aiError ? `<div class="nav-sub empty" title="${esc(state.aiError)}">${esc(state.aiError)}</div>` : ''}`) : ''}
-  </div>`;
 
-  h += `<div class="nav-sec">相册 <button id="btn-new-album" class="mini-btn" title="新建相册">＋</button></div>`;
-  h += state.albums.length
-    ? state.albums.map(a => `<div class="nav-item${act('album', a.id)}" data-type="album" data-key="${a.id}">${ICONS.album}<span class="lbl">${esc(a.name)}</span>${cnt((a.paths || []).length)}</div>`).join('')
-    : '<div class="nav-sub empty">还没有相册</div>';
-
-  h += `<div class="nav-sec">标签</div>`;
-  h += tags.length
-    ? tags.slice(0, 20).map(([k, n]) => `<div class="nav-item${act('tag', k)}" data-type="tag" data-key="${esc(k)}">${ICONS.tag}<span class="lbl">${esc(k)}</span>${cnt(n)}</div>`).join('')
-    : '<div class="nav-sub empty">在图片上添加标签</div>';
-
-  h += `<div class="nav-sec">整理</div>`;
-  h += `<div class="nav-item${act('dup', null)}" data-type="dup">${ICONS.copy}<span class="lbl">重复 / 相似</span></div>`;
-  h += `<div class="nav-item${act('trash', null)}" data-type="trash">${ICONS.trash}<span class="lbl">回收站</span>${trashN ? cnt(trashN) : ''}</div>`;
+  h += `<div class="nav-sec">工具</div>`;
+  h += `<div class="nav-item${act('dup', null)}" data-type="dup">${ICONS.copy}<span class="lbl">重复</span></div>`;
+  h += `<div class="nav-item${act('trash', null)}" data-type="trash">${ICONS.trash}<span class="lbl">回收站</span>${cnt(trashN)}</div>`;
+  // AI 运行入口（窄栏底部，常驻可见）。未运行时若有待识别图，显示数量提示
+  const aiLabel = state.aiRunning
+    ? `${state.aiPhaseLabel ? esc(state.aiPhaseLabel) + ' ' : ''}${state.aiDone || 0}/${state.aiTotal || 0}`
+    : (pendingAiN ? `AI ${pendingAiN > 999 ? '999+' : pendingAiN}` : 'AI');
+  const aiTitle = state.aiRunning
+    ? `${esc(state.aiPhaseLabel || 'AI 分析中')} ${state.aiDone || 0}/${state.aiTotal || 0}（点击取消）`
+    : (pendingAiN ? `${pendingAiN} 张待识别（点击只处理这些，很快）` : '运行 AI 分析（全部已识别）');
+  h += `<div class="nav-sub ai-run${state.aiRunning ? ' busy' : ''}" id="ai-run" title="${aiTitle}">${ICONS.play}<span class="lbl">${aiLabel}</span></div>`;
+  if (state.aiError) h += `<div class="nav-sub empty" title="${esc(state.aiError)}">AI错</div>`;
 
   $('#nav').innerHTML = h;
 }
@@ -235,22 +249,6 @@ function renderSidebar() {
 $('#nav').addEventListener('click', e => {
   if (e.target.closest('#btn-new-album')) { newAlbumModal(); return; }
   if (e.target.closest('#ai-run')) { runAiClassify(); return; }
-  const sec = e.target.closest('.sec-toggle');
-  if (sec) {
-    const s = sec.dataset.sec;
-    if (state.collapsedSections.has(s)) state.collapsedSections.delete(s);
-    else state.collapsedSections.add(s);
-    renderSidebar();
-    return;
-  }
-  const yr = e.target.closest('.year-toggle');
-  if (yr) {
-    const y = yr.dataset.year;
-    if (state.collapsedYears.has(y)) state.collapsedYears.delete(y);
-    else state.collapsedYears.add(y);
-    renderSidebar();
-    return;
-  }
   const el = e.target.closest('[data-type]');
   if (!el || el.classList.contains('head')) return;
   state.view = { type: el.dataset.type, key: el.dataset.key || null };
@@ -289,12 +287,16 @@ function renderContent() {
   $('#crumb').textContent = `图库 / ${title}`;
 
   let sub = `${items.length} 张 · 合计 ${fmtSize(sum)}`;
-  if (v.type === 'trash') sub += ' · 已删除文件在系统回收站中，可随时还原';
+  if (v.type === 'trash') {
+    const lostN = items.filter(i => i.missing).length;
+    sub += ' · 「移出」的图片文件未删除，可恢复';
+    if (lostN) sub += ` · 其中 ${lostN} 张原文件已丢失，无法预览/恢复`;
+  }
   let head = `<div><div class="view-title">${esc(title)}</div><div class="view-sub">${sub}</div></div>`;
   head += `<div class="head-actions">`;
   if (v.type === 'album') head += `<button class="chip" id="btn-album-rename">重命名</button><button class="chip danger" id="btn-album-del">删除相册</button>`;
   if (v.type === 'trash') head += `<button class="chip danger" id="btn-clear-rec">清除全部记录</button>`;
-  if (v.type !== 'trash' && v.type !== 'dup') head += `<button class="chip" id="btn-ai-head" title="用本地 AI 模型自动归类">⚡ AI 分类</button>`;
+  if (v.type !== 'trash' && v.type !== 'dup' && v.type !== 'aicat') head += `<button class="chip" id="btn-ai-head" title="用本地 AI 模型自动归类">⚡ AI 分类</button><button class="chip" id="btn-cloud-head" title="本地 NSFW 过滤后，联网精确识别游戏名/角色名（需配置 API key）">☁ 云端识别</button>`;
   head += `<button class="chip" id="btn-selall">全选</button>
     <div class="slider-wrap">${ICONS.zoomOut}<input id="thumb-size" type="range" min="110" max="300" value="${state.size}" title="缩略图大小">${ICONS.zoomIn}</div>
   </div>`;
@@ -303,6 +305,8 @@ function renderContent() {
   $('#btn-selall').onclick = selectAll;
   const aiHead = $('#btn-ai-head');
   if (aiHead) aiHead.onclick = runAiClassify;
+  const cloudHead = $('#btn-cloud-head');
+  if (cloudHead) cloudHead.onclick = runCloudClassify;
   $('#thumb-size').oninput = e => {
     state.size = +e.target.value;
     document.documentElement.style.setProperty('--cell', state.size + 'px');
@@ -314,7 +318,159 @@ function renderContent() {
   const clr = $('#btn-clear-rec');
   if (clr) clr.onclick = () => clearRecords(state.images.filter(i => i.trashed || i.missing).map(i => i.path));
 
+  // AI 视图：总览显示组卡片墙；选了组显示 pill 横条 + 网格
+  if (v.type === 'aicat' && !v.key) {
+    renderAiOverview();
+    return;
+  }
+  // AI 视图选了组：上方 pill 横条
+  if (v.type === 'aicat' && v.key) {
+    renderAiPillBar();
+  } else if (v.type === 'all' || v.type === 'star' || v.type === 'nsfw' || v.type === 'tag') {
+    // 图库类视图：顶部筛选栏（日期/类型/标签）
+    renderFilterBar();
+  }
+
   renderGrid();
+}
+
+/* AI 总览：pill 横条（总览+各组）+ 堆叠卡片墙 */
+function renderAiOverview() {
+  const items = state.images.filter(liveVisible);
+  const aiMap = new Map();
+  for (const i of items) if (i.aiClusterName) aiMap.set(i.aiClusterName, (aiMap.get(i.aiClusterName) || 0) + 1);
+  const aiGroups = [...aiMap.entries()].sort((a, b) => b[1] - a[1]);
+  const classified = aiGroups.reduce((s, [, n]) => s + n, 0);
+
+  // pill 横条
+  let pills = `<div class="pill-bar">`;
+  pills += `<div class="pill-tab active" data-type="aicat" data-key="">总览<span class="cnt">${classified}</span></div>`;
+  pills += aiGroups.map(([name, n]) => `<div class="pill-tab" data-type="aicat" data-key="${esc(name)}" title="${esc(name)}">${esc(name)}<span class="cnt">${n}</span></div>`).join('');
+  pills += `</div>`;
+
+  // 卡片墙
+  let wall = `<div class="stack-wall">`;
+  if (!aiGroups.length) {
+    wall += `<div class="stack-empty">尚未分类，点底部「AI」运行智能分析</div>`;
+  } else {
+    for (const [name, n] of aiGroups) {
+      // 取该组前 3 张图作堆叠缩略图
+      const groupItems = items.filter(i => i.aiClusterName === name).slice(0, 3);
+      const thumbs = groupItems.map(it => `<img data-path="${esc(it.path)}" alt="">`).join('');
+      const thumbHtml = thumbs
+        ? `<div class="stack-thumb">${thumbs}</div>`
+        : `<div class="stack-thumb-empty">🖼</div>`;
+      wall += `<div class="stack-card" data-type="aicat" data-key="${esc(name)}">
+        ${thumbHtml}
+        <div class="stack-name">${esc(name)}</div>
+        <div class="stack-sub">${n} 张</div>
+      </div>`;
+    }
+  }
+  wall += `</div>`;
+
+  $('#grid').classList.add('hidden');
+  const viewHead = $('#view-head');
+  // 在 view-head 下方插入 pill+wall（用一个容器）
+  let existing = $('#ai-overview-root');
+  if (existing) existing.remove();
+  const root = document.createElement('div');
+  root.id = 'ai-overview-root';
+  root.innerHTML = pills + wall;
+  // 插到 view-head 之后、grid 之前
+  viewHead.parentNode.insertBefore(root, viewHead.nextSibling);
+  // 懒加载堆叠卡片里的 img（直接 loadThumb，因为 io 回调对 img 不兼容）
+  root.querySelectorAll('.stack-thumb img').forEach(img => {
+    if (img.dataset.path) loadThumb(img.dataset.path, img);
+  });
+  // pill 点击
+  root.querySelectorAll('.pill-tab').forEach(p => {
+    p.onclick = () => {
+      state.view = { type: 'aicat', key: p.dataset.key || null };
+      renderSidebar(); renderContent();
+    };
+  });
+  // 卡片点击 → 进组
+  root.querySelectorAll('.stack-card[data-key]').forEach(c => {
+    c.onclick = () => {
+      state.view = { type: 'aicat', key: c.dataset.key };
+      renderSidebar(); renderContent();
+    };
+  });
+  updateEmptyState(items);
+}
+
+/* AI 视图选了组：pill 横条 */
+function renderAiPillBar() {
+  const items = state.images.filter(liveVisible);
+  const aiMap = new Map();
+  for (const i of items) if (i.aiClusterName) aiMap.set(i.aiClusterName, (aiMap.get(i.aiClusterName) || 0) + 1);
+  const aiGroups = [...aiMap.entries()].sort((a, b) => b[1] - a[1]);
+  const classified = aiGroups.reduce((s, [, n]) => s + n, 0);
+  const v = state.view;
+  let pills = `<div class="pill-bar">`;
+  pills += `<div class="pill-tab${v.type === 'aicat' && !v.key ? ' active' : ''}" data-type="aicat" data-key="">总览<span class="cnt">${classified}</span></div>`;
+  pills += aiGroups.map(([name, n]) => `<div class="pill-tab${v.type === 'aicat' && v.key === name ? ' active' : ''}" data-type="aicat" data-key="${esc(name)}" title="${esc(name)}">${esc(name)}<span class="cnt">${n}</span></div>`).join('');
+  pills += `</div>`;
+  let existing = $('#ai-overview-root');
+  if (existing) existing.remove();
+  const root = document.createElement('div');
+  root.id = 'ai-overview-root';
+  root.innerHTML = pills;
+  $('#view-head').parentNode.insertBefore(root, $('#view-head').nextSibling);
+  root.querySelectorAll('.pill-tab').forEach(p => {
+    p.onclick = () => {
+      state.view = { type: 'aicat', key: p.dataset.key || null };
+      renderSidebar(); renderContent();
+    };
+  });
+  $('#grid').classList.remove('hidden');
+}
+
+/* 图库视图筛选栏：日期/类型/标签下拉 */
+function renderFilterBar() {
+  const items = state.images.filter(live);
+  const v = state.view;
+  // 日期
+  const dateMap = new Map();
+  for (const i of items) { const k = monthOf(i); dateMap.set(k, (dateMap.get(k) || 0) + 1); }
+  const dates = [...dateMap.entries()].sort((a, b) => b[0].localeCompare(a[0]));
+  // 类型
+  const typeMap = new Map();
+  for (const i of items) typeMap.set(i.type, (typeMap.get(i.type) || 0) + 1);
+  const types = [...typeMap.entries()].sort((a, b) => b[1] - a[1]);
+  // 标签
+  const tagMap = new Map();
+  for (const i of items) for (const t of (i.tags || [])) tagMap.set(t, (tagMap.get(t) || 0) + 1);
+  const tags = [...tagMap.entries()].sort((a, b) => b[1] - a[1]);
+
+  let bar = `<div class="filter-bar">`;
+  bar += `<span class="filter-label">日期</span><select id="f-date"><option value="">全部</option>`;
+  bar += dates.map(([k, n]) => `<option value="${k}"${v.type === 'date' && v.key === k ? ' selected' : ''}>${k.slice(0, 4)}年${+k.slice(5, 7)}月 (${n})</option>`).join('');
+  bar += `</select>`;
+  bar += `<span class="filter-label">类型</span><select id="f-type"><option value="">全部</option>`;
+  bar += types.map(([k, n]) => `<option value="${esc(k)}"${v.type === 'ftype' && v.key === k ? ' selected' : ''}>${esc(k)} (${n})</option>`).join('');
+  bar += `</select>`;
+  if (tags.length) {
+    bar += `<span class="filter-label">标签</span><select id="f-tag"><option value="">全部</option>`;
+    bar += tags.map(([k, n]) => `<option value="${esc(k)}"${v.type === 'tag' && v.key === k ? ' selected' : ''}>${esc(k)} (${n})</option>`).join('');
+    bar += `</select>`;
+  }
+  bar += `</div>`;
+
+  let existing = $('#ai-overview-root');
+  if (existing) existing.remove();
+  const root = document.createElement('div');
+  root.id = 'ai-overview-root';
+  root.innerHTML = bar;
+  $('#view-head').parentNode.insertBefore(root, $('#view-head').nextSibling);
+
+  const fd = $('#f-date');
+  if (fd) fd.onchange = e => { const val = e.target.value; state.view = val ? { type: 'date', key: val } : { type: 'all', key: null }; renderSidebar(); renderContent(); };
+  const ft = $('#f-type');
+  if (ft) ft.onchange = e => { const val = e.target.value; state.view = val ? { type: 'ftype', key: val } : { type: 'all', key: null }; renderSidebar(); renderContent(); };
+  const ftg = $('#f-tag');
+  if (ftg) ftg.onchange = e => { const val = e.target.value; state.view = val ? { type: 'tag', key: val } : { type: 'all', key: null }; renderSidebar(); renderContent(); };
 }
 
 function renderGrid() {
@@ -416,6 +572,7 @@ function updateSelbar() {
   set('trash', v.type !== 'trash');
   set('unalbum', v.type === 'album');
   set('revive', v.type === 'trash');
+  set('purge', true); // 主视图/回收站视图都能彻底删除（送系统回收站）
   set('clearrec', v.type === 'trash');
 }
 
@@ -432,6 +589,7 @@ $('#selbar').addEventListener('click', e => {
     else if (act === 'rename') renameModal();
     else if (act === 'trash') trashSelected();
     else if (act === 'revive') reviveSelected();
+    else if (act === 'purge') purgeSelected();
     else if (act === 'unalbum') removeFromCurrentAlbum();
     else if (act === 'clearrec') clearRecords([...state.selected]);
     return;
@@ -617,7 +775,7 @@ function renderLbPanel(it) {
       <span class="lb-aicat-lbl">AI 分类</span>
       <select id="lb-aicat-sel" class="lb-select">
         <option value="">未分类</option>
-        ${AI_CATS.map(c => `<option value="${esc(c)}"${it.aiCategory === c ? ' selected' : ''}>${esc(c)}</option>`).join('')}
+        ${dynamicCats().map(c => `<option value="${esc(c)}"${it.aiClusterName === c ? ' selected' : ''}>${esc(c)}</option>`).join('')}
       </select>
       ${it.aiManual ? '<span class="lb-manual" title="已手动纠正，重新跑 AI 不会覆盖">手动</span>' : ''}
     </div>
@@ -638,7 +796,8 @@ function renderLbPanel(it) {
     <div>${albums.length ? albums.map(a => `<span class="tag">${esc(a.name)}</span>`).join('') : '<span class="muted">无</span>'}</div>
     <div class="lb-actions">
       <button class="chip" id="lb-folder">在文件夹中显示</button>
-      <button class="chip danger" id="lb-del">删除</button>
+      <button class="chip" id="lb-soft-del">移出图库</button>
+      <button class="chip danger" id="lb-purge">彻底删除</button>
     </div>`;
 
   const tagIn = $('#lb-tag-in');
@@ -666,10 +825,11 @@ function renderLbPanel(it) {
   };
   $('#lb-aicat-sel').onchange = async e => {
     const v = e.target.value;
+    it.aiClusterName = v || null;
     it.aiCategory = v || null;
     it.aiManual = !!v;
     it.aiConf = null;
-    await api.updateImage(it.path, { aiCategory: v });
+    await api.updateImage(it.path, { aiClusterName: v, aiCategory: v, aiManual: !!v });
     renderLbPanel(it);
     renderSidebar();
     renderGrid();
@@ -678,8 +838,9 @@ function renderLbPanel(it) {
   $('#lb-folder').onclick = () => api.openInFolder(it.path);
   $('#lb-star').onclick = async () => { await toggleStar(it.path); renderLbPanel(it); };
   $('#lb-nsfw').onclick = async () => { await toggleNsfw(it.path); renderLbPanel(it); };
-  $('#lb-del').onclick = async () => {
-    if (!(await confirmModal('移出图片', `将「${baseName(it.path)}」从图库移除？\\n文件不会被删除，可在左侧「回收站」中恢复。`, '移出', true))) return;
+  /* 移出图库（软删）：只改 DB，文件保留，可在回收站恢复 */
+  $('#lb-soft-del').onclick = async () => {
+    if (!(await confirmModal('移出图片', `将「${baseName(it.path)}」从图库移除？\n文件不会被删除，可在左侧「回收站」中恢复。`, '移出', true))) return;
     const res = await api.trashFiles([it.path]);
     if (res[0] && res[0].ok) {
       closeLightbox();
@@ -687,6 +848,24 @@ function renderLbPanel(it) {
       toast('已移入软件回收站');
     } else {
       toast('移出失败：' + ((res[0] && res[0].error) || '未知错误').slice(0, 60));
+    }
+  };
+  /* 彻底删除：物理文件送系统回收站（可还原），同时清除 PicFlow 记录 */
+  $('#lb-purge').onclick = async () => {
+    const ok = await confirmModal('彻底删除',
+      `将「${baseName(it.path)}」彻底删除？\n文件会被移到 Windows 系统回收站（可从回收站还原），并从 PicFlow 记录中清除。`,
+      '彻底删除', true);
+    if (!ok) return;
+    const res = await api.purgeFiles([it.path]);
+    if (res[0] && res[0].ok) {
+      closeLightbox();
+      await refreshLibrary();
+      const m = res[0].method;
+      toast(m === 'already-deleted' || m === 'already-gone' ? '文件已不存在，记录已清除'
+        : m === 'unlink.fallback' ? '回收站不可用，已永久删除'
+        : '已送入系统回收站');
+    } else {
+      toast('删除失败：' + ((res[0] && res[0].error) || '未知错误').slice(0, 60));
     }
   };
 }
@@ -704,7 +883,9 @@ function showModal(html) {
   ov.className = 'overlay';
   ov.innerHTML = `<div class="modal">${html}</div>`;
   $('#modal-root').append(ov);
-  ov.addEventListener('mousedown', e => { if (e.target === ov) ov.remove(); });
+  // 用 click 而非 mousedown：避免与按钮 click 事件竞争导致"取消按钮按不动"
+  // 只有真正点在遮罩空白处（e.target===ov）才关闭，点 modal 内部任何元素都不关
+  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
   return ov;
 }
 function confirmModal(title, text, okLabel = '确定', danger = false) {
@@ -730,6 +911,7 @@ function newAlbumModal() {
     await refreshLibrary();
     toast(`相册「${name}」已创建`);
   };
+  ov.querySelector('#al-cancel').onclick = () => ov.remove();
   ov.querySelector('#al-ok').onclick = create;
   input.onkeydown = e => { if (e.key === 'Enter') create(); };
 }
@@ -760,6 +942,7 @@ function renameCurrentAlbum() {
     await refreshLibrary();
     toast('相册已重命名');
   };
+  ov.querySelector('#ar-cancel').onclick = () => ov.remove();
   ov.querySelector('#ar-ok').onclick = save;
   input.onkeydown = e => { if (e.key === 'Enter') save(); };
 }
@@ -916,6 +1099,7 @@ function renameModal() {
       await refreshLibrary();
       toast(res[0] && res[0].ok ? '重命名成功' : '重命名失败');
     };
+    ov.querySelector('#rn-cancel').onclick = () => ov.remove();
     ov.querySelector('#rn-ok').onclick = go;
     input.onkeydown = e => { if (e.key === 'Enter') go(); };
     return;
@@ -986,6 +1170,33 @@ async function reviveSelected() {
   state.selected.clear();
   await refreshLibrary();
   toast(`已恢复 ${paths.length} 张图片到图库`);
+}
+
+/* 彻底删除：把物理文件送到 Windows 系统回收站（可从系统回收站还原），
+ * 并清除 PicFlow 记录。与"清除记录"不同：那个只删记录不碰文件，
+ * 这个真正删除文件。NSFW 图片同样走本地路径，绝不上传。 */
+async function purgeSelected() {
+  const paths = [...state.selected];
+  if (!paths.length) return;
+  const ok = await confirmModal('彻底删除',
+    `将选中的 ${paths.length} 张图片彻底删除？\n` +
+    `文件会被移到 Windows 系统回收站（可从系统回收站还原），并从 PicFlow 记录中清除。\n` +
+    `如果只想从软件移除但保留文件，请用「清除记录」。`,
+    '彻底删除', true);
+  if (!ok) return;
+  const res = await api.purgeFiles(paths);
+  const okN = res.filter(r => r.ok).length;
+  const failN = res.length - okN;
+  state.selected.clear();
+  state.dupStale = true;
+  await refreshLibrary();
+  if (failN === 0) {
+    toast(`已将 ${okN} 张图片送入系统回收站`);
+  } else {
+    const errs = res.filter(r => !r.ok).map(r => baseName(r.path) + ': ' + (r.error || '未知错误').slice(0, 80));
+    toast(`成功 ${okN} 张，失败 ${failN} 张`);
+    setTimeout(() => confirmModal('删除失败', errs.join('\n'), '知道了'), 500);
+  }
 }
 
 /* ================= 扫描 ================= */
@@ -1063,6 +1274,7 @@ document.addEventListener('keydown', e => {
 /* ================= 顶栏 ================= */
 $('#btn-scan').onclick = startScan;
 $('#btn-guide').onclick = showGuide;
+$('#btn-cloud-set').onclick = cloudConfigModal;
 $('#btn-menu').onclick = () => $('#sidebar').classList.toggle('collapsed');
 /* 多选模式开关：开启后点图即选中，圆圈显示；退出时清空选择 */
 $('#btn-multi').onclick = () => {
@@ -1083,6 +1295,9 @@ $('#btn-nsfw').onclick = () => {
   state.flags.nsfwMode = next;
   api.setFlag('nsfwMode', next);
   syncNsfwButton();
+  // 切换模式后立即重渲染：侧栏专区入口显隐 + AI 视图/图库重新按 NSFW 过滤
+  renderSidebar();
+  renderContent();
   renderSidebar();
   renderContent();
 };
@@ -1118,10 +1333,29 @@ function scheduleGrid() {
 /* ================= AI 智能分类 ================= */
 async function runAiClassify() {
   if (state.aiRunning) return;
+
+  // 增量优先：只识别"还没有分类结果"的图（新导入/手动清除过分类的）。
+  // 之前代码硬编码 redo:true，每次都全量重跑所有图——300 张就要一两个小时，
+  // 这是"识别非常慢"的主因。现在：
+  //   有未识别的图 → 只跑这些（通常几张，秒级完成）
+  //   全部已识别   → 弹窗询问是否全部重跑（用户明确要求才全量）
+  const candidates = state.images.filter(i => !i.trashed && !i.missing && !i.aiManual);
+  const pending = candidates.filter(i => !i.aiCluster).length;
+  let redo = false;
+  if (candidates.length && pending === 0) {
+    const ok = await confirmModal(
+      '全部重跑 AI 分类',
+      `当前 ${candidates.length} 张图都已有分类结果，没有待识别的新图。\n\n全部重跑会重新识别所有图片，速度较慢（约每张 20-30 秒）。\n如果只是想让新导入的图归类，直接点「取消」即可——下次会自动只处理新图。`,
+      '全部重跑', true
+    );
+    if (!ok) return;
+    redo = true;
+  }
+
   state.aiRunning = true; state.aiDone = 0; state.aiError = '';
   renderSidebar();
   try {
-    const r = await api.aiClassifyAll({ redo: true });
+    const r = await api.aiClassifyAll({ redo, nsfw: true });
     if (r && r.busy) { toast('AI 分类正在进行中…'); return; }
     if (r && r.error) { state.aiError = r.error; toast('AI 分类失败：' + r.error); }
   } catch (e) {
@@ -1130,6 +1364,90 @@ async function runAiClassify() {
   } finally {
     state.aiRunning = false;
     renderSidebar();
+  }
+}
+
+/* ================= 云端精确识别 ================= */
+
+/* 云端 API 设置弹窗：baseURL + apiKey + model + 测试连接 */
+function cloudConfigModal() {
+  const cfg = state.flags.cloudAI || {};
+  const ov = showModal(`<h3>云端识别设置</h3>
+    <div class="row">
+      <label class="f-label">API 地址 (baseURL)</label>
+      <input type="text" id="cc-base" placeholder="https://api.openai.com/v1" value="${esc(cfg.baseURL || '')}">
+      <div class="hint">OpenAI 官方填 https://api.openai.com/v1；国内兼容服务（豆包/通义/Kimi/DeepSeek/硅基流动等）填服务商给的地址，需支持 /chat/completions</div>
+    </div>
+    <div class="row">
+      <label class="f-label">API Key</label>
+      <input type="text" id="cc-key" placeholder="sk-..." value="${esc(cfg.apiKey || '')}">
+      <div class="hint">密钥只存在本地 library.json，不上传 PicFlow 服务器</div>
+    </div>
+    <div class="row">
+      <label class="f-label">模型名</label>
+      <input type="text" id="cc-model" placeholder="gpt-4o" value="${esc(cfg.model || '')}">
+      <div class="hint">需支持图片识别的多模态模型。OpenAI: gpt-4o / gpt-4o-mini；国内按服务商文档填</div>
+    </div>
+    <div class="hint" style="background:var(--accent-soft);border-radius:8px;padding:10px 12px;margin-top:8px;line-height:1.7">
+      <b>安全策略：</b>NSFW 图片先由本地 nsfwjs 检测，判定为 NSFW 的<b>绝不上网</b>，只有确认非 NSFW 的图才发云端识别。
+    </div>
+    <div class="modal-foot">
+      <button class="chip" id="cc-cancel">取消</button>
+      <button class="chip" id="cc-test">测试连接</button>
+      <button class="btn-primary" id="cc-save">保存</button>
+    </div>`);
+  ov.querySelector('#cc-cancel').onclick = () => ov.remove();
+  ov.querySelector('#cc-test').onclick = async () => {
+    const t = ov.querySelector('#cc-test');
+    t.textContent = '测试中…'; t.disabled = true;
+    const c = { baseURL: $('#cc-base').value.trim(), apiKey: $('#cc-key').value.trim(), model: $('#cc-model').value.trim() };
+    const r = await api.cloudConfigTest(c);
+    t.textContent = '测试连接'; t.disabled = false;
+    toast(r.ok ? '✓ 连接成功' : '✗ ' + r.error);
+  };
+  ov.querySelector('#cc-save').onclick = async () => {
+    const c = { baseURL: $('#cc-base').value.trim(), apiKey: $('#cc-key').value.trim(), model: $('#cc-model').value.trim() };
+    if (!c.baseURL || !c.apiKey) { toast('请填写 baseURL 和 apiKey'); return; }
+    await api.cloudConfigSet(c);
+    state.flags.cloudAI = c;
+    ov.remove();
+    toast('云端设置已保存');
+  };
+}
+
+/* 运行云端识别：NSFW 本地过滤 → 非 NSFW 联网精确识别 */
+async function runCloudClassify() {
+  const cfg = state.flags.cloudAI || {};
+  if (!cfg.baseURL || !cfg.apiKey) {
+    toast('请先配置云端 API（点侧栏底部「云端」按钮）');
+    cloudConfigModal();
+    return;
+  }
+  if (state.aiRunning) { toast('已有 AI 任务在进行中'); return; }
+  const ok = await confirmModal('云端精确识别',
+    '将对图库中的图片进行云端识别：\n' +
+    '1. 先用本地 nsfwjs 检测，NSFW 图绝不上网\n' +
+    '2. 非 NSFW 图发送到云端大模型，识别游戏名/角色名/图片类型\n' +
+    '3. 识别结果覆盖本地分类（云端结果更精确）\n\n' +
+    '注意：会消耗 API 额度；图片越多耗时越长（每张约 1-3 秒，可随时点侧栏 AI 停止）。',
+    '开始识别', true);
+  if (!ok) return;
+  state.aiRunning = true; state.aiDone = 0; state.aiError = '';
+  renderSidebar();
+  try {
+    const r = await api.cloudClassify({ redo: true });
+    if (r && r.busy) { toast('已有 AI 任务在进行'); return; }
+    if (r && r.error) { state.aiError = r.error; toast('云端识别失败：' + r.error); }
+    else if (r && r.ok) {
+      toast(`云端识别完成：成功 ${r.done} 张` + (r.skip ? `，NSFW 跳过 ${r.skip} 张` : '') + (r.fail ? `，失败 ${r.fail} 张` : ''));
+    }
+  } catch (e) {
+    state.aiError = String(e.message || e);
+    toast('云端识别失败：' + state.aiError);
+  } finally {
+    state.aiRunning = false;
+    renderSidebar();
+    await refreshLibrary();
   }
 }
 
@@ -1174,19 +1492,34 @@ async function runAiClassify() {
     toast(`扫描完成：共 ${d.total} 张图片${d.missing ? `，${d.missing} 条记录已失效` : ''}`);
   });
 
-  api.on('ai:start', () => { state.aiRunning = true; state.aiDone = 0; renderSidebar(); });
+  api.on('ai:start', () => { state.aiRunning = true; state.aiDone = 0; state.aiPhase = 'extract'; renderSidebar(); });
   api.on('ai:total', d => { state.aiTotal = d.total; renderSidebar(); });
-  api.on('ai:progress', d => { state.aiDone = d.done; renderSidebar(); });
-  api.on('ai:item', d => {
-    const it = byPath.get(d.path);
-    if (it) it.aiCategory = d.category;
-    if (gridTimer) return;
-    gridTimer = setTimeout(() => { gridTimer = null; renderSidebar(); if (state.view.type === 'aicat') renderContent(); }, 500);
+  api.on('ai:progress', d => {
+    state.aiDone = d.done; state.aiTotal = d.total;
+    state.aiPhase = d.phase || 'wd14';
+    const labels = {
+      loading: '加载', wd14: '识别', extract: '提取',
+      cluster: '聚类', nsfw: '检测'
+    };
+    state.aiPhaseLabel = labels[state.aiPhase] || '分析';
+    renderSidebar();
+  });
+  api.on('ai:ep', d => {
+    if (d && d.ep) {
+      const kindLabel = d.kind === 'int8' ? 'INT8' : d.kind === 'fp16' ? 'FP16' : '';
+      const epLabel = d.ep === 'dml' ? 'GPU 加速' : 'CPU';
+      toast(`WD14 引擎就绪（${[kindLabel, epLabel].filter(Boolean).join(' · ')}）`, 2600);
+    }
   });
   api.on('ai:done', async d => {
-    state.aiRunning = false;
-    if (d && d.error) { state.aiError = d.error; toast('AI 分类失败：' + d.error); }
-    else { toast(`AI 分类完成：成功 ${d.ok || 0} / ${d.done || 0} 张`); }
+    state.aiRunning = false; state.aiPhase = null; state.aiPhaseLabel = null;
+    if (d && d.error) { state.aiError = d.error; toast('AI 分析失败：' + d.error); }
+    else {
+      const parts = [];
+      if (d.wdCount != null) parts.push(`识别角色/作品 ${d.wdCount} 张`);
+      if (d.mnCount != null) parts.push(`聚类 ${d.mnCount} 张`);
+      toast(`AI 分析完成：${d.done || 0} 张图片分为 ${d.clusters || '?'} 组${parts.length ? '（' + parts.join('，') + '）' : ''}`, 4000);
+    }
     await refreshLibrary();
   });
 })();

@@ -37,6 +37,12 @@ library.json
 thumbs/
 picflow-data/
 
+# ============ AI 大模型（数百 MB，超 GitHub 100MB 单文件限制）============
+# 模型由打包流程从本地目录带进安装包，不进 git 仓库
+model/pixai-tagger/
+model/pixai-tagger-int8/
+model/*.onnx.gz
+
 # ============ 临时文件 ============
 *.tmp
 *.bak

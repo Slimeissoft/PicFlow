@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('api', {
   renameFiles: pairs => ipcRenderer.invoke('rename-files', pairs),
   moveFiles: (paths, dest) => ipcRenderer.invoke('move-files', paths, dest),
   trashFiles: paths => ipcRenderer.invoke('trash-files', paths),
+  purgeFiles: paths => ipcRenderer.invoke('purge-files', paths),
   reviveFiles: paths => ipcRenderer.invoke('revive-files', paths),
   removeRecords: paths => ipcRenderer.invoke('remove-records', paths),
   openInFolder: p => ipcRenderer.invoke('open-in-folder', p),
@@ -26,5 +27,9 @@ contextBridge.exposeInMainWorld('api', {
   aiClassifyAll: opts => ipcRenderer.invoke('ai-classify-all', opts),
   aiStop: () => ipcRenderer.invoke('ai-stop'),
   aiStatus: () => ipcRenderer.invoke('ai-status'),
+  cloudConfigGet: () => ipcRenderer.invoke('cloud-config-get'),
+  cloudConfigSet: cfg => ipcRenderer.invoke('cloud-config-set', cfg),
+  cloudConfigTest: cfg => ipcRenderer.invoke('cloud-config-test', cfg),
+  cloudClassify: opts => ipcRenderer.invoke('cloud-classify', opts),
   on: (ch, cb) => ipcRenderer.on(ch, (e, d) => cb(d))
 });

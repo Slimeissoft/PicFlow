@@ -9,14 +9,18 @@
 <body>
 <div id="app">
   <aside id="sidebar">
-    <div class="side-head">
-      <div class="logo">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg>
-      </div>
-      <div class="app-name">PicFlow <span>图片管家</span></div>
+    <div class="logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="7.5" height="7.5" rx="3"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="3"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="3"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="3"/></svg>
     </div>
     <nav id="nav"></nav>
-    <div class="side-foot"><span class="dot">●</span> 本地数据库 · 数据仅存于本机</div>
+    <button id="btn-cloud-set" class="nav-item nav-bottom" title="云端识别设置（NSFW 本地过滤后联网精确识别游戏/角色）">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><path d="M12 12v4M12 10h.01"/></svg>
+      <span class="lbl">云端</span>
+    </button>
+    <button id="btn-guide" class="nav-item nav-bottom" title="使用引导">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01"/></svg>
+      <span class="lbl">引导</span>
+    </button>
   </aside>
 
   <div id="right">
@@ -30,7 +34,6 @@
       <button id="btn-nsfw" class="pill toggle-nsfw" title="循环切换：隐藏 NSFW → 显示全部 → 仅看 NSFW">● NSFW 已隐藏</button>
       <input id="search" type="text" placeholder="搜索文件名、标签、备注…">
       <span id="status-pill" class="pill">…</span>
-      <button id="btn-guide" class="icon-btn" title="使用引导">?</button>
       <button id="btn-scan" class="btn-primary">扫描文件夹</button>
     </header>
     <div id="progress" class="hidden"><div id="progress-bar"></div></div>
@@ -57,6 +60,7 @@
   <button class="chip danger" data-act="trash">移出</button>
   <button class="chip hidden" data-act="unalbum">移出相册</button>
   <button class="chip hidden" data-act="revive">恢复到图库</button>
+  <button class="chip hidden danger" data-act="purge">彻底删除</button>
   <button class="chip hidden" data-act="clearrec">清除记录</button>
 </div>
 

@@ -1,7 +1,7 @@
 {
   "name": "picflow",
   "productName": "PicFlow 图片管家",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "本地图片整理与管理桌面应用",
   "main": "main.js",
   "author": "PicFlow",
@@ -10,6 +10,8 @@
     "dist": "electron-builder --win"
   },
   "dependencies": {
+    "@tensorflow/tfjs": "^4.22.0",
+    "nsfwjs": "^4.4.0",
     "onnxruntime-node": "^1.20.1"
   },
   "devDependencies": {
@@ -29,19 +31,32 @@
       "scanner.js",
       "db.js",
       "ai.js",
+      "cloudai.js",
+      "wd14-worker.js",
       "preload.js",
       "renderer/**/*",
-      "package.json"
+      "package.json",
+      "node_modules/@tensorflow/**",
+      "node_modules/nsfwjs/**",
+      "node_modules/onnxruntime-node/**",
+      "node_modules/onnxruntime-common/**"
     ],
     "extraResources": [
       {
         "from": "model",
-        "to": "model"
+        "to": "model",
+        "filter": [
+          "**/*",
+          "!pixai-tagger/**"
+        ]
       }
     ],
     "asarUnpack": [
+      "wd14-worker.js",
       "node_modules/onnxruntime-node/**",
-      "node_modules/onnxruntime-common/**"
+      "node_modules/onnxruntime-common/**",
+      "node_modules/@tensorflow/**",
+      "node_modules/nsfwjs/**"
     ],
     "win": {
       "icon": "build/icon.ico",
