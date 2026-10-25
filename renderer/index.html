@@ -13,9 +13,9 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="7.5" height="7.5" rx="3"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="3"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="3"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="3"/></svg>
     </div>
     <nav id="nav"></nav>
-    <button id="btn-cloud-set" class="nav-item nav-bottom" title="AI 识别设置（配置 OpenAI / Claude / DeepSeek 等大模型 API）">
+    <button id="btn-cloud-set" class="nav-item nav-bottom" title="设置：AI 识别接口、语言、外观、更新">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-      <span class="lbl">AI 设置</span>
+      <span class="lbl" data-i18n="settings">设置</span>
     </button>
     <button id="btn-guide" class="nav-item nav-bottom" title="使用引导">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01"/></svg>
@@ -65,15 +65,16 @@
 </div>
 
 <div id="lightbox" class="hidden">
-  <div class="lb-stage"><img id="lb-img" alt=""></div>
+  <div class="lb-stage"><img id="lb-img" alt="" draggable="false"></div>
   <aside id="lb-panel"></aside>
   <button id="lb-prev" class="lb-arrow" title="上一张 (←)">‹</button>
   <button id="lb-next" class="lb-arrow" title="下一张 (→)">›</button>
-  <button id="lb-full" class="lb-full" title="全屏显示 (F 或双击图片)">
+  <button id="lb-full" class="lb-full" title="全屏显示 (F)">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
   </button>
   <button id="lb-close" class="lb-close" title="关闭 (Esc)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
-  <div id="lb-hint" class="lb-hint">← → 切换 · F 或双击全屏 · 点击空白关闭 · Esc 退出</div>
+  <div id="lb-hint" class="lb-hint">滚轮缩放 · 双击全屏 · 全屏下单击放大 · 拖动查看细节 · ← → 切换 · Esc 退出</div>
+  <button id="lb-zoom" class="lb-zoom hidden" title=""></button>
 </div>
 
 <div id="update-bar" class="hidden">
@@ -87,6 +88,7 @@
 
 <div id="modal-root"></div>
 <div id="toast-root"></div>
+<script src="i18n.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

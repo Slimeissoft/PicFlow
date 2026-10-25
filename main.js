@@ -276,10 +276,13 @@ ipcMain.handle('update-image', async (e, p, patch) => {
     const v = patch.aiCategory.trim();
     if (v) {
       allowed.aiCategory = v;
+      // 分组视图按 aiClusterName 过滤，必须与 aiCategory 同步，否则改了分类图还在旧组里
+      allowed.aiClusterName = v;
       allowed.aiManual = true;
       allowed.aiConf = null;
     } else {
       allowed.aiCategory = null;
+      allowed.aiClusterName = null;
       allowed.aiManual = false;
       allowed.aiConf = null;
     }
@@ -647,7 +650,7 @@ ipcMain.handle('ai-classify-all', async (e, opts) => {
   const runNsfw = !opts || opts.nsfw !== false;
   const cfg = DB.getFlags().cloudAI || {};
   if (!cfg.baseURL || !cfg.apiKey || !cfg.model) {
-    return { ok: false, error: '还没有配置 AI 接口：点侧栏「AI 设置」填入服务商、API 地址、Key 和模型名' };
+    return { ok: false, error: '还没有配置 AI 接口：点侧栏「设置 → AI 识别」填入服务商、API 地址、Key 和模型名' };
   }
 
   aiRunning = true; aiCancel = false;
@@ -780,6 +783,33 @@ ipcMain.handle('batch-set-category', async (e, paths, category) => {
   return { ok: true, count: list.length };
 });
 
+/* ---------------- 重命名 AI 分类 ----------------
+ * AI 分出来的组名（= 相册名）可以改。改名会同步该组下所有图片，
+ * 并标记 aiManual，保证重新识别时不会把名字改回去。
+ * 若目标名已存在，等同于把两组并到一起。
+ */
+ipcMain.handle('rename-category', async (e, from, to) => {
+  const f = String(from || '').trim();
+  const t = String(to || '').trim();
+  if (!f) return { ok: false, error: '原分类名为空' };
+  if (!t) return { ok: false, error: '新分类名不能为空' };
+  if (f === t) return { ok: true, count: 0 };
+  let count = 0;
+  for (const im of DB.getImages()) {
+    if (im.aiClusterName === f || (!im.aiClusterName && im.aiCategory === f)) {
+      DB.updateImage(im.path, {
+        aiClusterName: t,
+        aiCategory: t,
+        aiManual: true,
+        aiConf: null
+      });
+      count++;
+    }
+  }
+  DB.flushSync();
+  return { ok: true, count };
+});
+
 /* ---------------- 自动更新（GitHub Releases） ----------------
  * electron-updater 读取 Release 中的 latest.yml 判断新版本，
  * 下载 NSIS 更新包，重启后自动安装。
@@ -819,8 +849,11 @@ function setupAutoUpdater() {
     error: String((err && err.message) || err).slice(0, 200)
   }));
 
-  // 启动 8 秒后静默检查一次（等首屏加载完）
-  setTimeout(() => { autoUpdater.checkForUpdates().catch(() => {}); }, 8000);
+  // 启动 8 秒后静默检查一次（等首屏加载完）；用户可在设置里关掉「启动检查更新」
+  setTimeout(() => {
+    if (DB.getFlags().autoUpdateCheck === false) return;
+    autoUpdater.checkForUpdates().catch(() => {});
+  }, 8000);
 }
 
 ipcMain.handle('update-check', async () => {
@@ -841,4 +874,17 @@ ipcMain.handle('update-install', async () => {
   return { ok: true };
 });
 ipcMain.handle('app-version', async () => app.getVersion());
+
+/* 设置面板用：版本 / 数据目录 / 平台信息 */
+ipcMain.handle('app-info', async () => ({
+  version: app.getVersion(),
+  dataDir: app.getPath('userData'),
+  isPackaged: app.isPackaged,
+  platform: process.platform
+}));
+
+ipcMain.handle('open-data-dir', async () => {
+  try { await shell.openPath(app.getPath('userData')); return { ok: true }; }
+  catch (e) { return { ok: false, error: String(e.message || e) }; }
+});
 

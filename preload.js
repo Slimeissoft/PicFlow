@@ -32,10 +32,13 @@ contextBridge.exposeInMainWorld('api', {
   cloudConfigTest: cfg => ipcRenderer.invoke('cloud-config-test', cfg),
   cloudProviders: () => ipcRenderer.invoke('cloud-providers'),
   batchSetCategory: (paths, category) => ipcRenderer.invoke('batch-set-category', paths, category),
+  renameCategory: (from, to) => ipcRenderer.invoke('rename-category', from, to),
   // 自动更新
   updateCheck: () => ipcRenderer.invoke('update-check'),
   updateDownload: () => ipcRenderer.invoke('update-download'),
   updateInstall: () => ipcRenderer.invoke('update-install'),
   appVersion: () => ipcRenderer.invoke('app-version'),
+  appInfo: () => ipcRenderer.invoke('app-info'),
+  openDataDir: () => ipcRenderer.invoke('open-data-dir'),
   on: (ch, cb) => ipcRenderer.on(ch, (e, d) => cb(d))
 });

@@ -38,6 +38,78 @@ function liveVisible(i) {
   return true;
 }
 
+/* ================= 多语言 =================
+ * 词表在 i18n.js（以简体中文原文为 key），未翻译的文案自动回退中文。
+ */
+const LANGS = (window.PF_I18N && window.PF_I18N.langs) || [{ id: 'zh-CN', label: '简体中文' }];
+const I18N_DICT = (window.PF_I18N && window.PF_I18N.dict) || {};
+let LANG = 'zh-CN';
+function tr(zh) {
+  if (LANG === 'zh-CN') return zh;
+  const d = I18N_DICT[LANG];
+  return (d && d[zh]) || zh;
+}
+/* 数量：3 photos / 3枚 / 3 张 */
+function pc(n) {
+  n = Number(n) || 0;
+  if (LANG === 'en') return `${n} photo${n === 1 ? '' : 's'}`;
+  if (LANG === 'ja') return `${n}枚`;
+  return `${n} ${LANG === 'zh-TW' ? '張' : '张'}`;
+}
+/* 月份标题：中文/日文用 2026年10月，英文用 2026-10 */
+function fmtMonth(key) {
+  if (LANG === 'en') return key;
+  return `${key.slice(0, 4)}年${+key.slice(5, 7)}月`;
+}
+
+/* 刷新写死在 HTML 里的静态文案（启动 / 切换语言时调用） */
+function applyLangUI() {
+  document.documentElement.lang = LANG === 'zh-TW' ? 'zh-Hant' : LANG;
+  const s = $('#search');
+  if (s) s.placeholder = tr('搜索文件名、标签、备注…');
+  const scan = $('#btn-scan');
+  if (scan) scan.textContent = tr('扫描文件夹');
+  const guide = $('#btn-guide');
+  if (guide) { const l = guide.querySelector('.lbl'); if (l) l.textContent = tr('引导'); }
+  const setBtn = $('#btn-cloud-set');
+  if (setBtn) {
+    const l = setBtn.querySelector('.lbl');
+    if (l) l.textContent = tr('设置');
+    setBtn.title = tr('设置');
+  }
+  const multi = $('#btn-multi');
+  if (multi) multi.textContent = state.multi ? tr('✓ 完成选择') : tr('☑ 多选');
+  if (typeof syncNsfwButton === 'function') syncNsfwButton();
+  /* 底部批量操作条 */
+  const sbLabels = {
+    star: tr('★ 星标'), nsfw: tr('🔞 标记 NSFW'), tag: tr('标签'),
+    aicat: tr('标注分类…'), album: tr('相册'), move: tr('移动…'),
+    rename: tr('重命名'), trash: tr('移出'), unalbum: tr('移出相册'),
+    revive: tr('恢复到图库'), purge: tr('彻底删除'), clearrec: tr('清除记录')
+  };
+  for (const act of Object.keys(sbLabels)) {
+    const b = document.querySelector(`#selbar [data-act="${act}"]`);
+    if (b) b.textContent = sbLabels[act];
+  }
+  const sbx = $('#sb-clear');
+  if (sbx) sbx.title = tr('取消选择');
+  /* 灯箱 */
+  const hint = $('#lb-hint');
+  if (hint) hint.textContent = tr('滚轮缩放 · 双击全屏 · 全屏下单击放大 · 拖动查看细节 · ← → 切换 · Esc 退出');
+  const lbPrev = $('#lb-prev'), lbNext = $('#lb-next'), lbFull = $('#lb-full'), lbClose = $('#lb-close');
+  if (lbPrev) lbPrev.title = tr('上一张 (←)');
+  if (lbNext) lbNext.title = tr('下一张 (→)');
+  if (lbFull) lbFull.title = $('#lightbox').classList.contains('fullscreen') ? tr('退出全屏 (F)') : tr('全屏显示 (F)');
+  if (lbClose) lbClose.title = tr('关闭 (Esc)');
+  /* 底部快捷键提示 */
+  const hb = $('#hint-bar');
+  if (hb) {
+    hb.textContent = state.multi
+      ? tr('点击图片 选中/取消 · Shift+点击 范围选择 · 选好后用底部操作条批量处理 · 点「完成选择」退出')
+      : tr('单击 预览 · 开启右上「多选」后点击图片直接选中 · Ctrl+A 全选 · Del 移出');
+  }
+}
+
 const ICONS = {
   grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg>',
   calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>',
@@ -62,6 +134,7 @@ const state = {
   multi: false,
   collapsedYears: null, // Set：已折叠的年份；首次渲染只展开最新一年
   collapsedSections: null, // Set：已折叠的区块（date/ftype/aicat）；默认全部收起
+  albumsCollapsed: localStorage.getItem('pf.albumsCollapsed') === '1', // 侧栏「整理」相册区是否收起
   size: 168,
   items: [],
   lbIndex: -1,
@@ -201,36 +274,44 @@ function renderSidebar() {
 
   let h = '';
   // 主导航
-  h += `<div class="nav-item${act('all', null)}" data-type="all">${ICONS.grid}<span class="lbl">图库</span>${cnt(items.length)}</div>`;
-  h += `<div class="nav-item${v.type === 'aicat' && !v.key ? ' active' : act('aicat', v.key)}" data-type="aicat" data-key="">${ICONS.ai}<span class="lbl">AI 分类</span>${cnt(classifiedN)}</div>`;
-  h += `<div class="nav-item${act('star', null)}" data-type="star">${ICONS.star}<span class="lbl">星标</span>${cnt(starN)}</div>`;
+  h += `<div class="nav-item${act('all', null)}" data-type="all">${ICONS.grid}<span class="lbl">${tr('图库')}</span>${cnt(items.length)}</div>`;
+  h += `<div class="nav-item${v.type === 'aicat' && !v.key ? ' active' : act('aicat', v.key)}" data-type="aicat" data-key="">${ICONS.ai}<span class="lbl">${tr('AI 分类')}</span>${cnt(classifiedN)}</div>`;
+  h += `<div class="nav-item${act('star', null)}" data-type="star">${ICONS.star}<span class="lbl">${tr('星标')}</span>${cnt(starN)}</div>`;
   // NSFW 专区入口：隐藏模式下不显示（用户要求"点隐藏就把 NSFW 和专区一块藏起来"），
   // 切到"显示全部"或"仅看 NSFW"时才出现
   if (nsfwMode !== 'hidden') {
     h += `<div class="nav-item${act('nsfw', null)}" data-type="nsfw"><span class="nav-emoji">🔞</span><span class="lbl">NSFW</span>${cnt(nsfwN)}</div>`;
   }
 
-  h += `<div class="nav-sec">整理</div>`;
-  // 相册区域：包进滚动容器，避免十几个相册把侧栏塞满
-  h += `<div class="nav-albums">`;
-  if (state.albums.length) {
-    h += state.albums.map(a => `<div class="nav-item${act('album', a.id)}" data-type="album" data-key="${a.id}">${ICONS.album}<span class="lbl">${esc(a.name)}</span>${cnt((a.paths || []).length)}</div>`).join('');
+  // 「整理」：可点击折叠，相册多的时候一键收进抽屉
+  const albumsCollapsed = !!state.albumsCollapsed;
+  h += `<div class="nav-sec toggle${albumsCollapsed ? ' collapsed' : ''}" id="sec-albums"
+    title="${albumsCollapsed ? tr('展开相册') : tr('收起相册')}" role="button" aria-expanded="${!albumsCollapsed}">
+    <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M6 9l6 6 6-6"/></svg>
+    <span>${tr('整理')}</span>${albumsCollapsed && state.albums.length ? `<span class="sec-n">${state.albums.length}</span>` : ''}
+  </div>`;
+  if (!albumsCollapsed) {
+    // 相册区域：包进滚动容器，避免十几个相册把侧栏塞满
+    h += `<div class="nav-albums">`;
+    if (state.albums.length) {
+      h += state.albums.map(a => `<div class="nav-item${act('album', a.id)}" data-type="album" data-key="${a.id}">${ICONS.album}<span class="lbl">${esc(a.name)}</span>${cnt((a.paths || []).length)}</div>`).join('');
+    }
+    h += `<div class="nav-item" id="btn-new-album" title="${tr('新建相册')}">${ICONS.album}<span class="lbl">${tr('＋相册')}</span></div>`;
+    h += `</div>`;
   }
-  h += `<div class="nav-item" id="btn-new-album" title="新建相册">${ICONS.album}<span class="lbl">＋相册</span></div>`;
-  h += `</div>`;
 
   // 标签（最多展示前 8 个，其余通过图库视图筛选栏访问）
   const tagMap = new Map();
   for (const i of items) for (const t of (i.tags || [])) tagMap.set(t, (tagMap.get(t) || 0) + 1);
   const tags = [...tagMap.entries()].sort((a, b) => b[1] - a[1]);
   if (tags.length) {
-    h += `<div class="nav-sec">标签</div>`;
+    h += `<div class="nav-sec">${tr('标签')}</div>`;
     h += tags.slice(0, 8).map(([k, n]) => `<div class="nav-item${act('tag', k)}" data-type="tag" data-key="${esc(k)}" title="${esc(k)}">${ICONS.tag}<span class="lbl">${esc(k)}</span>${cnt(n)}</div>`).join('');
   }
 
-  h += `<div class="nav-sec">工具</div>`;
-  h += `<div class="nav-item${act('dup', null)}" data-type="dup">${ICONS.copy}<span class="lbl">重复</span></div>`;
-  h += `<div class="nav-item${act('trash', null)}" data-type="trash">${ICONS.trash}<span class="lbl">回收站</span>${cnt(trashN)}</div>`;
+  h += `<div class="nav-sec">${tr('工具')}</div>`;
+  h += `<div class="nav-item${act('dup', null)}" data-type="dup">${ICONS.copy}<span class="lbl">${tr('重复')}</span></div>`;
+  h += `<div class="nav-item${act('trash', null)}" data-type="trash">${ICONS.trash}<span class="lbl">${tr('回收站')}</span>${cnt(trashN)}</div>`;
   // AI 运行入口（窄栏底部，常驻可见）。未运行时若有待识别图，显示数量提示
   const aiLabel = state.aiRunning
     ? `${state.aiPhaseLabel ? esc(state.aiPhaseLabel) + ' ' : ''}${state.aiDone || 0}/${state.aiTotal || 0}`
@@ -247,6 +328,13 @@ function renderSidebar() {
 $('#nav').addEventListener('click', e => {
   if (e.target.closest('#btn-new-album')) { newAlbumModal(); return; }
   if (e.target.closest('#ai-run')) { runAiClassify(); return; }
+  // 「整理」折叠头：只切换抽屉，不切换视图
+  if (e.target.closest('#sec-albums')) {
+    state.albumsCollapsed = !state.albumsCollapsed;
+    localStorage.setItem('pf.albumsCollapsed', state.albumsCollapsed ? '1' : '0');
+    renderSidebar();
+    return;
+  }
   const el = e.target.closest('[data-type]');
   if (!el || el.classList.contains('head')) return;
   state.view = { type: el.dataset.type, key: el.dataset.key || null };
@@ -258,33 +346,48 @@ $('#nav').addEventListener('click', e => {
 /* ================= 内容区 ================= */
 function viewTitle() {
   const v = state.view;
-  if (v.type === 'all') return '全部图片';
-  if (v.type === 'star') return '星标';
-  if (v.type === 'nsfw') return 'NSFW 专区';
-  if (v.type === 'date') return `${v.key.slice(0, 4)}年${+v.key.slice(5, 7)}月`;
-  if (v.type === 'ftype') return `${v.key} 图片`;
-  if (v.type === 'aicat') return v.key;
+  if (v.type === 'all') return tr('全部图片');
+  if (v.type === 'star') return tr('星标');
+  if (v.type === 'nsfw') return tr('NSFW 专区');
+  if (v.type === 'date') return fmtMonth(v.key);
+  if (v.type === 'ftype') return v.key;
+  if (v.type === 'aicat') return v.key || tr('AI 分类');
   if (v.type === 'tag') return `# ${v.key}`;
   if (v.type === 'album') {
     const a = state.albums.find(x => x.id === v.key);
-    return a ? a.name : '相册';
+    return a ? a.name : tr('相册');
   }
-  if (v.type === 'trash') return '回收站';
-  return '图库';
+  if (v.type === 'trash') return tr('回收站');
+  return tr('图库');
 }
 
 function renderContent() {
   const v = state.view;
+  // 统一清掉上一次内容区插入的附加容器（AI 总览卡片墙 / 筛选栏），
+  // 否则从「AI 分类」切到相册或分组时，旧的卡片墙会一直压在内容区上面。
+  const staleRoot = $('#ai-overview-root');
+  if (staleRoot) staleRoot.remove();
+
   if (v.type === 'dup') { renderDuplicates(); return; }
   $('#dup-root').classList.add('hidden');
   $('#grid').classList.remove('hidden');
+  $('#view-head').classList.remove('hidden');
 
   const items = state.items = currentItems();
   const sum = items.reduce((s, i) => s + (i.size || 0), 0);
   const title = viewTitle();
-  $('#crumb').textContent = `图库 / ${title}`;
+  $('#crumb').textContent = `${tr('图库')} / ${title}`;
 
-  let sub = `${items.length} 张 · 合计 ${fmtSize(sum)}`;
+  let sub;
+  if (v.type === 'aicat' && !v.key) {
+    // 总览：显示已分类图片数与分类数（网格本身是空的，不显示「0 张」）
+    const m = new Map();
+    for (const i of state.images.filter(liveVisible)) if (i.aiClusterName) m.set(i.aiClusterName, (m.get(i.aiClusterName) || 0) + 1);
+    const n = [...m.values()].reduce((a, b) => a + b, 0);
+    sub = `${pc(n)} · ${m.size} ${tr('个分类')}`;
+  } else {
+    sub = LANG === 'en' ? `${pc(items.length)} · ${fmtSize(sum)}` : `${pc(items.length)} · 合计 ${fmtSize(sum)}`;
+  }
   if (v.type === 'trash') {
     const lostN = items.filter(i => i.missing).length;
     sub += ' · 「移出」的图片文件未删除，可恢复';
@@ -292,21 +395,31 @@ function renderContent() {
   }
   let head = `<div><div class="view-title">${esc(title)}</div><div class="view-sub">${sub}</div></div>`;
   head += `<div class="head-actions">`;
-  if (v.type === 'album') head += `<button class="chip" id="btn-album-rename">重命名</button><button class="chip danger" id="btn-album-del">删除相册</button>`;
-  if (v.type === 'trash') head += `<button class="chip danger" id="btn-clear-rec">清除全部记录</button>`;
-  if (v.type !== 'trash' && v.type !== 'dup' && v.type !== 'aicat') head += `<button class="chip" id="btn-ai-head" title="调用你配置的多模态大模型 API 识别图片">⚡ AI 识别</button>`;
-  head += `<button class="chip" id="btn-selall">全选</button>
-    <div class="slider-wrap">${ICONS.zoomOut}<input id="thumb-size" type="range" min="110" max="300" value="${state.size}" title="缩略图大小">${ICONS.zoomIn}</div>
-  </div>`;
+  if (v.type === 'album') head += `<button class="chip" id="btn-album-rename">${tr('重命名')}</button><button class="chip danger" id="btn-album-del">${tr('删除相册')}</button>`;
+  if (v.type === 'aicat' && v.key) head += `<button class="chip" id="btn-cat-rename" title="给这个 AI 分类改个名字">✎ ${tr('重命名分类')}</button>`;
+  if (v.type === 'trash') head += `<button class="chip danger" id="btn-clear-rec">${tr('清除全部记录')}</button>`;
+  if (v.type !== 'trash' && v.type !== 'dup' && v.type !== 'aicat') head += `<button class="chip" id="btn-ai-head" title="调用你配置的多模态大模型 API 识别图片">⚡ ${tr('AI 识别')}</button>`;
+  // AI 总览没有具体图片，不显示「全选 / 缩略图大小」
+  const showGridTools = !(v.type === 'aicat' && !v.key);
+  if (showGridTools) {
+    head += `<button class="chip" id="btn-selall">${tr('全选')}</button>
+    <div class="slider-wrap">${ICONS.zoomOut}<input id="thumb-size" type="range" min="110" max="300" value="${state.size}" title="${tr('缩略图大小')}">${ICONS.zoomIn}</div>`;
+  }
+  head += `</div>`;
   $('#view-head').innerHTML = head;
 
-  $('#btn-selall').onclick = selectAll;
+  if (showGridTools) {
+    $('#btn-selall').onclick = selectAll;
+    $('#thumb-size').oninput = e => {
+      state.size = +e.target.value;
+      document.documentElement.style.setProperty('--cell', state.size + 'px');
+    };
+    $('#thumb-size').onchange = () => { api.setFlag('thumbSize', state.size); };
+  }
   const aiHead = $('#btn-ai-head');
   if (aiHead) aiHead.onclick = runAiClassify;
-  $('#thumb-size').oninput = e => {
-    state.size = +e.target.value;
-    document.documentElement.style.setProperty('--cell', state.size + 'px');
-  };
+  const catRen = $('#btn-cat-rename');
+  if (catRen) catRen.onclick = () => renameCategoryModal(v.key);
   const alBtn = $('#btn-album-del');
   if (alBtn) alBtn.onclick = deleteCurrentAlbum;
   const alRen = $('#btn-album-rename');
@@ -340,14 +453,14 @@ function renderAiOverview() {
 
   // pill 横条
   let pills = `<div class="pill-bar">`;
-  pills += `<div class="pill-tab active" data-type="aicat" data-key="">总览<span class="cnt">${classified}</span></div>`;
+  pills += `<div class="pill-tab active" data-type="aicat" data-key="">${tr('总览')}<span class="cnt">${classified}</span></div>`;
   pills += aiGroups.map(([name, n]) => `<div class="pill-tab" data-type="aicat" data-key="${esc(name)}" title="${esc(name)}">${esc(name)}<span class="cnt">${n}</span></div>`).join('');
   pills += `</div>`;
 
   // 卡片墙
   let wall = `<div class="stack-wall">`;
   if (!aiGroups.length) {
-    wall += `<div class="stack-empty">尚未分类，点底部「AI」运行智能分析</div>`;
+    wall += `<div class="stack-empty">${tr('尚未分类，点底部「AI」运行智能分析')}</div>`;
   } else {
     for (const [name, n] of aiGroups) {
       // 取该组前 3 张图作堆叠缩略图
@@ -358,8 +471,9 @@ function renderAiOverview() {
         : `<div class="stack-thumb-empty">🖼</div>`;
       wall += `<div class="stack-card" data-type="aicat" data-key="${esc(name)}">
         ${thumbHtml}
+        <button class="stack-edit" data-rename="${esc(name)}" title="${tr('重命名分类')}">✎</button>
         <div class="stack-name">${esc(name)}</div>
-        <div class="stack-sub">${n} 张</div>
+        <div class="stack-sub">${pc(n)}</div>
       </div>`;
     }
   }
@@ -386,14 +500,27 @@ function renderAiOverview() {
       renderSidebar(); renderContent();
     };
   });
-  // 卡片点击 → 进组
-  root.querySelectorAll('.stack-card[data-key]').forEach(c => {
-    c.onclick = () => {
-      state.view = { type: 'aicat', key: c.dataset.key };
-      renderSidebar(); renderContent();
+  // 卡片点击 → 进组（编辑按钮单独处理，不触发进入）
+  root.querySelectorAll('.stack-edit').forEach(btn => {
+    btn.onclick = ev => {
+      ev.stopPropagation();
+      renameCategoryModal(btn.dataset.rename || '');
     };
   });
-  updateEmptyState(items);
+  root.querySelectorAll('.stack-card[data-key]').forEach(c => {
+    c.onclick = ev => {
+      if (ev.target.closest('.stack-edit')) return;
+      state.view = { type: 'aicat', key: c.dataset.key };
+      renderSidebar(); renderContent();
+      // 切到分组后回到顶部，避免沿用总览的滚动位置
+      const content = $('#content');
+      if (content) content.scrollTop = 0;
+    };
+  });
+  // 总览视图里网格/空状态都不该出现，否则会在卡片墙下面露出空网格
+  $('#grid').classList.add('hidden');
+  $('#empty-state').classList.add('hidden');
+  $('#view-head').classList.remove('hidden');
 }
 
 /* AI 视图选了组：pill 横条 */
@@ -405,7 +532,7 @@ function renderAiPillBar() {
   const classified = aiGroups.reduce((s, [, n]) => s + n, 0);
   const v = state.view;
   let pills = `<div class="pill-bar">`;
-  pills += `<div class="pill-tab${v.type === 'aicat' && !v.key ? ' active' : ''}" data-type="aicat" data-key="">总览<span class="cnt">${classified}</span></div>`;
+  pills += `<div class="pill-tab${v.type === 'aicat' && !v.key ? ' active' : ''}" data-type="aicat" data-key="">${tr('总览')}<span class="cnt">${classified}</span></div>`;
   pills += aiGroups.map(([name, n]) => `<div class="pill-tab${v.type === 'aicat' && v.key === name ? ' active' : ''}" data-type="aicat" data-key="${esc(name)}" title="${esc(name)}">${esc(name)}<span class="cnt">${n}</span></div>`).join('');
   pills += `</div>`;
   let existing = $('#ai-overview-root');
@@ -441,14 +568,14 @@ function renderFilterBar() {
   const tags = [...tagMap.entries()].sort((a, b) => b[1] - a[1]);
 
   let bar = `<div class="filter-bar">`;
-  bar += `<span class="filter-label">日期</span><select id="f-date"><option value="">全部</option>`;
-  bar += dates.map(([k, n]) => `<option value="${k}"${v.type === 'date' && v.key === k ? ' selected' : ''}>${k.slice(0, 4)}年${+k.slice(5, 7)}月 (${n})</option>`).join('');
+  bar += `<span class="filter-label">${tr('日期')}</span><select id="f-date"><option value="">${tr('全部')}</option>`;
+  bar += dates.map(([k, n]) => `<option value="${k}"${v.type === 'date' && v.key === k ? ' selected' : ''}>${fmtMonth(k)} (${n})</option>`).join('');
   bar += `</select>`;
-  bar += `<span class="filter-label">类型</span><select id="f-type"><option value="">全部</option>`;
+  bar += `<span class="filter-label">${tr('类型')}</span><select id="f-type"><option value="">${tr('全部')}</option>`;
   bar += types.map(([k, n]) => `<option value="${esc(k)}"${v.type === 'ftype' && v.key === k ? ' selected' : ''}>${esc(k)} (${n})</option>`).join('');
   bar += `</select>`;
   if (tags.length) {
-    bar += `<span class="filter-label">标签</span><select id="f-tag"><option value="">全部</option>`;
+    bar += `<span class="filter-label">${tr('标签')}</span><select id="f-tag"><option value="">${tr('全部')}</option>`;
     bar += tags.map(([k, n]) => `<option value="${esc(k)}"${v.type === 'tag' && v.key === k ? ' selected' : ''}>${esc(k)} (${n})</option>`).join('');
     bar += `</select>`;
   }
@@ -502,17 +629,17 @@ function updateEmptyState(items) {
     $('#view-head').classList.add('hidden');
     el.innerHTML = `<div class="empty-card">
       <div class="empty-logo">${ICONS.grid}</div>
-      <h2>欢迎使用 PicFlow 图片管家</h2>
-      <p>三步开始整理你的本地图片：</p>
+      <h2>${tr('欢迎使用 PicFlow 图片管家')}</h2>
+      <p>${tr('三步开始整理你的本地图片：')}</p>
       <ol>
-        <li><b>导入</b> — 点击「扫描文件夹」，选择存放图片的目录（自动包含子文件夹）</li>
-        <li><b>浏览</b> — 图片按拍摄日期、文件类型自动分类，左侧栏切换视图</li>
-        <li><b>整理</b> — 单击看大图；点右上「多选」后点击图片直接选中，可批量打标签、建相册、重命名、移动、删除</li>
+        <li><b>${tr('导入')}</b> — ${tr('点击「扫描文件夹」，选择存放图片的目录（自动包含子文件夹）')}</li>
+        <li><b>${tr('浏览')}</b> — ${tr('图片按拍摄日期、文件类型自动分类，左侧栏切换视图')}</li>
+        <li><b>${tr('整理')}</b> — ${tr('单击看大图；点右上「多选」后点击图片直接选中，可批量打标签、建相册、重命名、移动、删除')}</li>
       </ol>
-      <p class="muted">「重复 / 相似」视图可一键清理重复图片；搜索框支持文件名、标签与备注。</p>
+      <p class="muted">${tr('「重复 / 相似」视图可一键清理重复图片；搜索框支持文件名、标签与备注。')}</p>
       <div class="empty-actions">
-        <button class="btn-primary" id="empty-scan">扫描文件夹</button>
-        <button class="chip" id="empty-guide">查看使用引导</button>
+        <button class="btn-primary" id="empty-scan">${tr('扫描文件夹')}</button>
+        <button class="chip" id="empty-guide">${tr('查看使用引导')}</button>
       </div>
     </div>`;
     $('#empty-scan').onclick = startScan;
@@ -555,7 +682,7 @@ function updateSelbar() {
   const n = state.selected.size;
   if (!n) { bar.classList.add('hidden'); return; }
   bar.classList.remove('hidden');
-  $('#sb-count').innerHTML = `已选 <b>${n}</b> 张`;
+  $('#sb-count').innerHTML = `${tr('已选')} <b>${n}</b> ${tr('张图片')}`;
   const v = state.view;
   const set = (act, show) => bar.querySelector(`[data-act="${act}"]`).classList.toggle('hidden', !show);
   set('star', v.type !== 'trash');
@@ -736,10 +863,103 @@ async function renderDuplicates() {
 }
 
 /* ================= 灯箱 ================= */
+/* 缩放/平移状态：s=倍率，x/y=平移像素（相对居中位置） */
+const lbZoom = { s: 1, x: 0, y: 0 };
+let lbDrag = null;
+let lbDragged = false;
+let lbClickTimer = null;          // 全屏下单击要等一下，判断是不是双击
+function lbClearClickTimer() {
+  if (lbClickTimer) { clearTimeout(lbClickTimer); lbClickTimer = null; }
+}
+
+function lbApplyZoom() {
+  const img = $('#lb-img');
+  if (!img) return;
+  const z = lbZoom;
+  img.style.transform = (z.s === 1 && !z.x && !z.y) ? '' : `translate(${z.x}px, ${z.y}px) scale(${z.s})`;
+  img.classList.toggle('zoomed', z.s > 1.001);
+  $('#lightbox').classList.toggle('zoomed', z.s > 1.001);
+  /* 右下角比例牌：x 倍 + 相对原图像素的百分比（100% = 1:1 原始像素） */
+  const badge = $('#lb-zoom');
+  if (badge) {
+    const on = z.s > 1.001;
+    badge.classList.toggle('hidden', !on);
+    if (on) {
+      const pct = lbNatPct();
+      badge.textContent = `${z.s < 10 ? z.s.toFixed(1) : Math.round(z.s)}× · ${pct}%`;
+      badge.classList.toggle('over', pct > 100);
+      badge.title = pct > 100
+        ? tr('已超过原图像素，再放大只是插值变糊 · 点击回到 1:1')
+        : tr('仍在原图像素以内，细节完整 · 点击切到 1:1');
+    }
+  }
+}
+/* 当前显示宽度 / 原图宽度：0.19 表示只用到原图 19% 的像素 */
+function lbNativeRatio() {
+  const img = $('#lb-img');
+  if (!img || !img.naturalWidth || !img.clientWidth) return 1;
+  return img.clientWidth / img.naturalWidth;
+}
+function lbNatPct(s) {
+  return Math.round(lbNativeRatio() * (s == null ? lbZoom.s : s) * 100);
+}
+/* 最大倍率：至少 8 倍；超大图放宽到能摸到原图 1:1（上限 20 倍） */
+function lbMaxScale() {
+  const r = lbNativeRatio();
+  if (!r) return 8;
+  return Math.max(8, Math.min(20, (1 / r) * 2));
+}
+/* 跳到原图 1:1（100% 像素），居中显示 */
+function lbSnapNative() {
+  const r = lbNativeRatio();
+  if (!r) return;
+  const s = Math.min(lbMaxScale(), Math.max(1, 1 / r));
+  lbZoom.s = s; lbZoom.x = 0; lbZoom.y = 0;
+  lbApplyZoom();
+  toast(`${tr('原始像素 1:1')} · ${s < 10 ? s.toFixed(1) : Math.round(s)}×`);
+}
+function lbResetZoom() {
+  lbZoom.s = 1; lbZoom.x = 0; lbZoom.y = 0;
+  const img = $('#lb-img');
+  if (img) img.classList.remove('dragging');
+  lbApplyZoom();
+}
+/* 限制平移范围，别把图片拖出屏幕外 */
+function lbClampPan() {
+  const img = $('#lb-img');
+  const stage = $('.lb-stage');
+  if (!img || !stage) return;
+  const iw = img.offsetWidth * lbZoom.s;
+  const ih = img.offsetHeight * lbZoom.s;
+  const maxX = Math.max(0, (iw - stage.clientWidth) / 2 + 30);
+  const maxY = Math.max(0, (ih - stage.clientHeight) / 2 + 30);
+  lbZoom.x = Math.min(maxX, Math.max(-maxX, lbZoom.x));
+  lbZoom.y = Math.min(maxY, Math.max(-maxY, lbZoom.y));
+}
+/* 以 (clientX, clientY) 为锚点缩放到 scale：该点下的像素保持不动 */
+function lbZoomTo(scale, clientX, clientY) {
+  const img = $('#lb-img');
+  if (!img || $('#lightbox').classList.contains('hidden')) return;
+  const s2 = Math.min(lbMaxScale(), Math.max(1, scale));
+  const rect = img.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  const px = clientX == null ? cx : clientX;
+  const py = clientY == null ? cy : clientY;
+  const ratio = s2 / lbZoom.s;
+  lbZoom.x = (px - cx) - (px - cx - lbZoom.x) * ratio;
+  lbZoom.y = (py - cy) - (py - cy - lbZoom.y) * ratio;
+  lbZoom.s = s2;
+  if (s2 <= 1.001) { lbZoom.s = 1; lbZoom.x = 0; lbZoom.y = 0; }
+  lbClampPan();
+  lbApplyZoom();
+}
+
 async function openLightbox(idx) {
   const it = state.items[idx];
   if (!it) return;
   state.lbIndex = idx;
+  lbResetZoom();
   $('#lightbox').classList.remove('hidden');
   const cached = thumbCache.get(it.path);
   $('#lb-img').src = cached || '';
@@ -750,20 +970,25 @@ async function openLightbox(idx) {
 function closeLightbox() {
   $('#lightbox').classList.add('hidden');
   $('#lightbox').classList.remove('fullscreen');
+  lbResetZoom();
   if (document.fullscreenElement) { try { document.exitFullscreen(); } catch (e) {} }
   $('#lb-img').src = '';
   state.lbIndex = -1;
 }
-/* 全屏查看：图片铺满窗口（按钮 / 双击图片 / F 键触发） */
+/* 全屏查看：图片铺满窗口（按钮 / F 键触发；单击图片是放大，不再用双击） */
 function toggleLightboxFullscreen() {
   const lb = $('#lightbox');
   if (lb.classList.contains('hidden')) return;
   const on = lb.classList.toggle('fullscreen');
+  lbResetZoom();
+  lbClearClickTimer();
+  const fb = $('#lb-full');
+  if (fb) fb.title = on ? tr('退出全屏 (F)') : tr('全屏显示 (F)');
   if (on) {
     if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
       document.documentElement.requestFullscreen().catch(() => {});
     }
-    toast('全屏查看（按 F 或双击图片退出全屏）', 2000);
+    toast(tr('全屏查看 · 单击放大 · 双击退出'), 2000);
   } else {
     if (document.fullscreenElement) { try { document.exitFullscreen(); } catch (e) {} }
   }
@@ -780,36 +1005,36 @@ function renderLbPanel(it) {
   $('#lb-panel').innerHTML = `
     <div class="lb-name" title="${esc(it.path)}">${esc(baseName(it.path))}</div>
     <div class="lb-tools">
-      <button id="lb-star"${starCls}>${it.starred ? '★ 已星标' : '☆ 加星标'}</button>
-      <button id="lb-nsfw"${nsfwCls}>${it.nsfw ? '🔞 NSFW' : '🔞 标记 NSFW'}</button>
+      <button id="lb-star"${starCls}>${it.starred ? '★ ' + tr('已星标') : '☆ ' + tr('加星标')}</button>
+      <button id="lb-nsfw"${nsfwCls}>${it.nsfw ? '🔞 NSFW' : tr('🔞 标记 NSFW')}</button>
     </div>
     <div class="lb-aicat">
-      <span class="lb-aicat-lbl">AI 分类</span>
+      <span class="lb-aicat-lbl">${tr('AI 分类')}</span>
       <select id="lb-aicat-sel" class="lb-select">
-        <option value="">未分类</option>
+        <option value="">${tr('未分类')}</option>
         ${dynamicCats().map(c => `<option value="${esc(c)}"${it.aiClusterName === c ? ' selected' : ''}>${esc(c)}</option>`).join('')}
       </select>
-      ${it.aiManual ? '<span class="lb-manual" title="已手动纠正，重新跑 AI 不会覆盖">手动</span>' : ''}
+      ${it.aiManual ? `<span class="lb-manual" title="已手动纠正，重新跑 AI 不会覆盖">${tr('手动')}</span>` : ''}
     </div>
     <div class="lb-info">
-      <div><span>拍摄时间</span><b>${it.exifDate ? fmtDate(it.exifDate) : '未记录'}</b></div>
-      <div><span>修改时间</span><b>${fmtDate(it.mtime)}</b></div>
-      <div><span>类型</span><b>${esc(it.type)}</b></div>
-      <div><span>大小</span><b>${fmtSize(it.size)}</b></div>
+      <div><span>${tr('拍摄时间')}</span><b>${it.exifDate ? fmtDate(it.exifDate) : '—'}</b></div>
+      <div><span>${tr('修改时间')}</span><b>${fmtDate(it.mtime)}</b></div>
+      <div><span>${tr('类型')}</span><b>${esc(it.type)}</b></div>
+      <div><span>${tr('大小')}</span><b>${fmtSize(it.size)}</b></div>
     </div>
-    <div class="lb-sec">标签</div>
+    <div class="lb-sec">${tr('标签')}</div>
     <div class="tag-editor" id="lb-tags">
       ${(it.tags || []).map(t => `<span class="tag">${esc(t)}<i data-tag="${esc(t)}">✕</i></span>`).join('')}
       <input id="lb-tag-in" placeholder="回车添加">
     </div>
-    <div class="lb-sec">备注</div>
-    <textarea id="lb-note" rows="3" placeholder="添加备注…">${esc(it.note || '')}</textarea>
-    <div class="lb-sec">所属相册</div>
-    <div>${albums.length ? albums.map(a => `<span class="tag">${esc(a.name)}</span>`).join('') : '<span class="muted">无</span>'}</div>
+    <div class="lb-sec">${tr('备注')}</div>
+    <textarea id="lb-note" rows="3" placeholder="…">${esc(it.note || '')}</textarea>
+    <div class="lb-sec">${tr('所属相册')}</div>
+    <div>${albums.length ? albums.map(a => `<span class="tag">${esc(a.name)}</span>`).join('') : `<span class="muted">${tr('无')}</span>`}</div>
     <div class="lb-actions">
-      <button class="chip" id="lb-folder">在文件夹中显示</button>
-      <button class="chip" id="lb-soft-del">移出图库</button>
-      <button class="chip danger" id="lb-purge">彻底删除</button>
+      <button class="chip" id="lb-folder">${tr('在文件夹中显示')}</button>
+      <button class="chip" id="lb-soft-del">${tr('移出图库')}</button>
+      <button class="chip danger" id="lb-purge">${tr('彻底删除')}</button>
     </div>`;
 
   const tagIn = $('#lb-tag-in');
@@ -884,15 +1109,82 @@ function renderLbPanel(it) {
 $('#lb-prev').onclick = () => lbNav(-1);
 $('#lb-next').onclick = () => lbNav(1);
 $('#lb-close').onclick = closeLightbox;
-/* 全屏：按钮 / 双击图片 / F 键 */
+/* 全屏：按钮 / F 键 */
 $('#lb-full').onclick = toggleLightboxFullscreen;
-$('#lb-img').addEventListener('dblclick', toggleLightboxFullscreen);
+/* 比例牌：点击在「1:1 原始像素」与「2.6 倍」之间切换 */
+$('#lb-zoom').onclick = e => {
+  e.stopPropagation();
+  if (Math.abs(lbNatPct() - 100) <= 6) { lbResetZoom(); lbZoomTo(2.6); }
+  else lbSnapNative();
+};
 document.addEventListener('fullscreenchange', () => {
   if (!document.fullscreenElement) $('#lightbox').classList.remove('fullscreen');
 });
-/* 点击图片以外的空白处关闭灯箱 */
+/* 单击：非全屏不放大（放大靠滚轮，单击只负责还原）；全屏下切换放大/还原。
+ * 全屏下延迟 200ms 再执行，好让双击「退出全屏」有机会取消它。 */
+$('#lb-img').addEventListener('click', e => {
+  if (lbDragged) { lbDragged = false; return; }
+  const fs = $('#lightbox').classList.contains('fullscreen');
+  if (!fs) {
+    if (lbZoom.s > 1.001) lbResetZoom();
+    return;
+  }
+  const cx = e.clientX, cy = e.clientY;
+  lbClearClickTimer();
+  lbClickTimer = setTimeout(() => {
+    lbClickTimer = null;
+    if ($('#lightbox').classList.contains('hidden')) return;
+    if (lbZoom.s > 1.001) lbResetZoom();
+    else lbZoomTo(2.6, cx, cy);
+  }, 200);
+});
+/* 双击：非全屏进全屏，全屏退出全屏 */
+$('#lb-img').addEventListener('dblclick', e => {
+  e.preventDefault();
+  lbClearClickTimer();
+  toggleLightboxFullscreen();
+});
+/* 滚轮平滑缩放（只拦灯箱舞台，信息面板仍可正常滚动） */
+$('#lightbox').addEventListener('wheel', e => {
+  if ($('#lightbox').classList.contains('hidden')) return;
+  if (!e.target.closest('.lb-stage')) return;
+  e.preventDefault();
+  const factor = Math.exp(-e.deltaY * 0.0018);
+  lbZoomTo(lbZoom.s * factor, e.clientX, e.clientY);
+}, { passive: false });
+/* 放大后拖动平移 */
+$('#lb-img').addEventListener('pointerdown', e => {
+  if (lbZoom.s <= 1.001) return;
+  e.preventDefault();
+  lbDrag = { x: e.clientX, y: e.clientY, ox: lbZoom.x, oy: lbZoom.y, moved: false };
+  $('#lb-img').classList.add('dragging');
+  try { $('#lb-img').setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+});
+$('#lb-img').addEventListener('pointermove', e => {
+  if (!lbDrag) return;
+  const dx = e.clientX - lbDrag.x;
+  const dy = e.clientY - lbDrag.y;
+  if (Math.abs(dx) + Math.abs(dy) > 4) lbDrag.moved = true;
+  lbZoom.x = lbDrag.ox + dx;
+  lbZoom.y = lbDrag.oy + dy;
+  lbClampPan();
+  lbApplyZoom();
+});
+const lbEndDrag = e => {
+  if (!lbDrag) return;
+  lbDragged = lbDrag.moved;
+  lbDrag = null;
+  $('#lb-img').classList.remove('dragging');
+  try { $('#lb-img').releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+};
+$('#lb-img').addEventListener('pointerup', lbEndDrag);
+$('#lb-img').addEventListener('pointercancel', lbEndDrag);
+/* 点击图片以外的空白处：放大时先还原，否则关闭灯箱 */
 $('#lightbox').addEventListener('mousedown', e => {
-  if (e.target === $('#lightbox') || e.target.classList.contains('lb-stage') || e.target.id === 'lb-hint') closeLightbox();
+  if (e.target === $('#lightbox') || e.target.classList.contains('lb-stage') || e.target.id === 'lb-hint') {
+    if (lbZoom.s > 1.001) { lbResetZoom(); return; }
+    closeLightbox();
+  }
 });
 
 /* ================= 弹窗 ================= */
@@ -1209,10 +1501,11 @@ function updatePill() {
   const el = $('#status-pill');
   if (state.scanning) {
     el.className = 'pill amber';
-    el.textContent = `扫描中 ${state.scanDone}/${state.scanTotal}`;
+    el.textContent = `${tr('扫描中')} ${state.scanDone}/${state.scanTotal}`;
   } else {
     el.className = 'pill green';
-    el.textContent = `已收录 ${state.images.filter(live).length} 张`;
+    const n = state.images.filter(live).length;
+    el.textContent = LANG === 'en' ? `${pc(n)} in library` : `${tr('已收录')} ${pc(n)}`;
   }
 }
 
@@ -1238,13 +1531,18 @@ document.addEventListener('keydown', e => {
 
   if (e.key === 'Escape') {
     if ($('#modal-root').children.length) { $('#modal-root').lastChild.remove(); return; }
-    if (!$('#lightbox').classList.contains('hidden')) closeLightbox();
+    if (!$('#lightbox').classList.contains('hidden')) {
+      // 放大状态下先还原，再按一次才关闭
+      if (lbZoom.s > 1.001) { lbResetZoom(); return; }
+      closeLightbox();
+    }
     return;
   }
   if (!$('#lightbox').classList.contains('hidden')) {
     if (e.key === 'ArrowLeft') lbNav(-1);
     if (e.key === 'ArrowRight') lbNav(1);
     if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleLightboxFullscreen(); }
+    if (e.key === '1') { e.preventDefault(); lbSnapNative(); }
     if (state.lbIndex >= 0 && state.items[state.lbIndex]) {
       const it = state.items[state.lbIndex];
       if (e.key === 's' || e.key === 'S') { e.preventDefault(); toggleStar(it.path).then(() => renderLbPanel(it)); }
@@ -1265,18 +1563,18 @@ document.addEventListener('keydown', e => {
 /* ================= 顶栏 ================= */
 $('#btn-scan').onclick = startScan;
 $('#btn-guide').onclick = showGuide;
-$('#btn-cloud-set').onclick = cloudConfigModal;
+$('#btn-cloud-set').onclick = () => settingsModal('general');
 $('#btn-menu').onclick = () => $('#sidebar').classList.toggle('collapsed');
 /* 多选模式开关：开启后点图即选中，圆圈显示；退出时清空选择 */
 $('#btn-multi').onclick = () => {
   state.multi = !state.multi;
   const btn = $('#btn-multi');
   btn.classList.toggle('on', state.multi);
-  btn.textContent = state.multi ? '✓ 完成选择' : '☑ 多选';
+  btn.textContent = state.multi ? tr('✓ 完成选择') : tr('☑ 多选');
   $('#grid').classList.toggle('multi', state.multi);
   $('#hint-bar').textContent = state.multi
-    ? '点击图片 选中/取消 · Shift+点击 范围选择 · 选好后用底部操作条批量处理 · 点「完成选择」退出'
-    : '单击 预览 · 开启右上「多选」后点击图片直接选中 · Ctrl+A 全选 · Del 移出';
+    ? tr('点击图片 选中/取消 · Shift+点击 范围选择 · 选好后用底部操作条批量处理 · 点「完成选择」退出')
+    : tr('单击 预览 · 开启右上「多选」后点击图片直接选中 · Ctrl+A 全选 · Del 移出');
   if (!state.multi) { state.selected.clear(); syncSelectionUI(); }
 };
 $('#btn-nsfw').onclick = () => {
@@ -1296,9 +1594,9 @@ function syncNsfwButton() {
   const mode = state.flags.nsfwMode || (state.flags.nsfwHidden === false ? 'shown' : 'hidden');
   const btn = $('#btn-nsfw');
   btn.classList.toggle('show', mode !== 'hidden');
-  btn.innerHTML = mode === 'hidden' ? '● NSFW 已隐藏'
-    : mode === 'shown' ? '● NSFW 显示中'
-    : '🔞 仅看 NSFW';
+  btn.innerHTML = mode === 'hidden' ? '● ' + tr('NSFW 已隐藏')
+    : mode === 'shown' ? '● ' + tr('NSFW 显示中')
+    : '🔞 ' + tr('仅看 NSFW');
 }
 let searchTimer = null;
 $('#search').addEventListener('input', e => {
@@ -1364,98 +1662,245 @@ async function runAiClassify() {
   }
 }
 
-/* ================= AI 设置（服务商预设 + 自定义） ================= */
+/* ================= 设置（语言 / AI / 外观 / 数据 / 关于） ================= */
 let _providersCache = null;
-async function cloudConfigModal() {
+let _appInfoCache = null;
+
+/* 切换语言：立即刷新静态文案（侧栏/内容区由调用方重绘） */
+function setLanguage(id) {
+  LANG = LANGS.some(l => l.id === id) ? id : 'zh-CN';
+  document.documentElement.lang = LANG === 'zh-TW' ? 'zh-Hant' : LANG;
+  applyLangUI();
+}
+
+async function settingsModal(initialTab = 'general') {
   const cfg = state.flags.cloudAI || {};
   if (!_providersCache) {
     try { _providersCache = await api.cloudProviders(); } catch (e) { _providersCache = {}; }
   }
+  if (!_appInfoCache) {
+    try { _appInfoCache = await api.appInfo(); } catch (e) { _appInfoCache = {}; }
+  }
   const providers = _providersCache;
+  const info = _appInfoCache || {};
   const cur = cfg.provider && providers[cfg.provider] ? cfg.provider : 'openai';
-  const ov = showModal(`<h3>AI 设置</h3>
-    <div class="row">
-      <label class="f-label">服务商</label>
-      <select id="cc-provider" class="lb-select" style="width:100%">
-        ${Object.entries(providers).map(([k, v]) => `<option value="${k}"${k === cur ? ' selected' : ''}>${esc(v.label)}</option>`).join('')}
-      </select>
-      <div class="hint" id="cc-hint"></div>
-    </div>
-    <div class="row">
-      <label class="f-label">API 地址</label>
-      <input type="text" id="cc-base" placeholder="https://api.openai.com/v1" value="${esc(cfg.baseURL || '')}">
-    </div>
-    <div class="row">
-      <label class="f-label">API Key</label>
-      <input type="password" id="cc-key" placeholder="sk-..." value="${esc(cfg.apiKey || '')}">
-      <div class="hint">只保存在本机 library.json，不会上传到任何服务器</div>
-    </div>
-    <div class="row">
-      <label class="f-label">模型名</label>
-      <input type="text" id="cc-model" placeholder="gpt-4o-mini" value="${esc(cfg.model || '')}">
-      <div class="hint">必须支持图片输入（多模态模型）</div>
-    </div>
-    <div class="row">
-      <label class="f-label">并发数</label>
-      <input type="number" id="cc-conc" min="1" max="5" value="${esc(String(cfg.concurrency || 3))}">
-      <div class="hint">同时识别几张，越高越快；遇到限流（429）就调低</div>
-    </div>
-    <div class="hint" style="background:var(--accent-soft);border-radius:8px;padding:10px 12px;margin-top:8px;line-height:1.7">
-      <b>隐私：</b>每张图先在本地做 NSFW 检测，命中 NSFW 的图片<b>绝不上传</b>；只有正常图片才发到你配置的 API。
-    </div>
-    <div class="modal-foot">
-      <button class="chip" id="cc-cancel">取消</button>
-      <button class="chip" id="cc-test">测试连接</button>
-      <button class="btn-primary" id="cc-save">保存</button>
+  const autoCheck = state.flags.autoUpdateCheck !== false;
+  const liveN = state.images.filter(i => !i.trashed && !i.missing).length;
+  const catN = new Set(state.images.map(i => i.aiClusterName).filter(Boolean)).size;
+
+  const tabDefs = [
+    ['general', tr('常规')],
+    ['ai', tr('AI 识别')],
+    ['appearance', tr('外观')],
+    ['data', tr('数据')],
+    ['about', tr('关于')]
+  ];
+
+  const ov = showModal(`
+    <div class="settings-modal">
+      <h3>${tr('设置')}</h3>
+      <div class="settings-tabs">
+        ${tabDefs.map(([k, label]) => `<button class="settings-tab${k === initialTab ? ' active' : ''}" data-tab="${k}">${label}</button>`).join('')}
+      </div>
+      <div class="settings-body">
+        <div class="settings-pane${initialTab === 'general' ? ' active' : ''}" data-pane="general">
+          <div class="settings-row">
+            <div><div class="sr-main">${tr('界面语言')}</div><div class="sr-sub">${tr('切换后界面文字立即生效')}</div></div>
+            <select id="st-lang" class="lb-select">
+              ${LANGS.map(l => `<option value="${l.id}"${l.id === LANG ? ' selected' : ''}>${esc(l.label)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="settings-row">
+            <div><div class="sr-main">${tr('启动时检查更新')}</div><div class="sr-sub">${tr('发现新版本会在底部提示，可一键下载')}</div></div>
+            <button class="switch${autoCheck ? ' on' : ''}" id="st-auto" aria-pressed="${autoCheck}"></button>
+          </div>
+          <div class="settings-note" style="margin-top:16px">
+            ${tr('所有数据都保存在本机，不上传云端。图片识别只把非 NSFW 图发给你自己配置的 API。')}
+          </div>
+        </div>
+
+        <div class="settings-pane${initialTab === 'ai' ? ' active' : ''}" data-pane="ai">
+          <div class="row">
+            <label class="f-label">${tr('服务商')}</label>
+            <select id="st-provider" class="lb-select" style="width:100%">
+              ${Object.entries(providers).map(([k, v]) => `<option value="${k}"${k === cur ? ' selected' : ''}>${esc(v.label)}</option>`).join('')}
+            </select>
+            <div class="hint" id="st-provider-hint"></div>
+          </div>
+          <div class="row">
+            <label class="f-label">${tr('API 地址')}</label>
+            <input type="text" id="st-base" placeholder="https://api.openai.com/v1" value="${esc(cfg.baseURL || '')}">
+          </div>
+          <div class="row">
+            <label class="f-label">API Key</label>
+            <input type="password" id="st-key" placeholder="sk-..." value="${esc(cfg.apiKey || '')}">
+            <div class="hint">${tr('只保存在本机 library.json，不会上传到任何服务器')}</div>
+          </div>
+          <div class="row">
+            <label class="f-label">${tr('模型名')}</label>
+            <input type="text" id="st-model" placeholder="gpt-4o-mini" value="${esc(cfg.model || '')}">
+            <div class="hint">${tr('必须支持图片输入（多模态模型）')}</div>
+          </div>
+          <div class="row">
+            <label class="f-label">${tr('并发数')}</label>
+            <input type="number" id="st-conc" min="1" max="5" value="${esc(String(cfg.concurrency || 3))}">
+            <div class="hint">${tr('同时识别几张，越高越快；遇到限流（429）就调低')}</div>
+          </div>
+          <div class="settings-note" style="margin-bottom:10px">
+            <b>隐私：</b>每张图先在本地做 NSFW 检测，命中 NSFW 的图片绝不上传；只有正常图片才发到你配置的 API。
+          </div>
+          <button class="chip" id="st-test">${tr('测试连接')}</button>
+        </div>
+
+        <div class="settings-pane${initialTab === 'appearance' ? ' active' : ''}" data-pane="appearance">
+          <div class="settings-row">
+            <div><div class="sr-main">${tr('缩略图大小')}</div><div class="sr-sub"><span id="st-size-val">${state.size}</span> px</div></div>
+            <input type="range" id="st-size" min="110" max="300" value="${state.size}">
+          </div>
+        </div>
+
+        <div class="settings-pane${initialTab === 'data' ? ' active' : ''}" data-pane="data">
+          <div class="kv-line"><span>${tr('数据目录')}</span><b>${esc(info.dataDir || '—')}</b></div>
+          <div class="kv-line"><span>${tr('图库')}</span><b>${pc(liveN)} · ${catN} ${tr('个分类')}</b></div>
+          <div class="kv-line"><span>${tr('相册')}</span><b>${state.albums.length}</b></div>
+          <div class="settings-row" style="margin-top:8px">
+            <div><div class="sr-main">${tr('打开目录')}</div><div class="sr-sub">${tr('library.json / 缩略图缓存都在这里')}</div></div>
+            <button class="chip" id="st-opendir">${tr('打开目录')}</button>
+          </div>
+        </div>
+
+        <div class="settings-pane${initialTab === 'about' ? ' active' : ''}" data-pane="about">
+          <div class="settings-row">
+            <div><div class="sr-main">PicFlow 图片管家</div><div class="sr-sub">${tr('版本')} v${esc(info.version || '—')}</div></div>
+            <span class="pill" style="background:var(--accent-soft);color:var(--accent-dark)">Electron</span>
+          </div>
+          <div class="settings-row">
+            <div><div class="sr-main">${tr('检查更新')}</div><div class="sr-sub">${tr('GitHub Releases 自动更新')}</div></div>
+            <button class="chip" id="st-upd">${tr('检查更新')}</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="chip" id="st-cancel">${tr('取消')}</button>
+        <button class="btn-primary" id="st-save">${tr('保存')}</button>
+      </div>
     </div>`);
 
-  const pSel = ov.querySelector('#cc-provider');
-  const baseIn = ov.querySelector('#cc-base');
-  const keyIn = ov.querySelector('#cc-key');
-  const modelIn = ov.querySelector('#cc-model');
-  const hintEl = ov.querySelector('#cc-hint');
+  /* 分区切换 */
+  ov.querySelector('.modal').classList.add('modal-settings');
+  ov.querySelectorAll('.settings-tab').forEach(b => {
+    b.onclick = () => {
+      ov.querySelectorAll('.settings-tab').forEach(x => x.classList.toggle('active', x === b));
+      ov.querySelectorAll('.settings-pane').forEach(p => p.classList.toggle('active', p.dataset.pane === b.dataset.tab));
+    };
+  });
 
+  /* AI 配置 */
+  const pSel = ov.querySelector('#st-provider');
+  const baseIn = ov.querySelector('#st-base');
+  const keyIn = ov.querySelector('#st-key');
+  const modelIn = ov.querySelector('#st-model');
+  const hintEl = ov.querySelector('#st-provider-hint');
   const applyProvider = (k, force) => {
     const p = providers[k];
     if (!p) return;
-    hintEl.textContent = p.hint || '';
+    if (hintEl) hintEl.textContent = p.hint || '';
     if (force) {
       if (p.baseURL) baseIn.value = p.baseURL;
       if (p.model) modelIn.value = p.model;
     }
   };
   if (!cfg.baseURL) applyProvider(cur, true);
-  else hintEl.textContent = (providers[cur] && providers[cur].hint) || '';
+  else if (hintEl) hintEl.textContent = (providers[cur] && providers[cur].hint) || '';
   pSel.onchange = () => applyProvider(pSel.value, true);
 
-  const collect = () => ({
+  const collectAI = () => ({
     provider: pSel.value,
     api: (providers[pSel.value] && providers[pSel.value].api) || 'openai',
     baseURL: baseIn.value.trim(),
     apiKey: keyIn.value.trim(),
     model: modelIn.value.trim(),
-    concurrency: Math.max(1, Math.min(5, Number(ov.querySelector('#cc-conc').value) || 3))
+    concurrency: Math.max(1, Math.min(5, Number(ov.querySelector('#st-conc').value) || 3))
   });
 
-  ov.querySelector('#cc-cancel').onclick = () => ov.remove();
-  ov.querySelector('#cc-test').onclick = async () => {
-    const t = ov.querySelector('#cc-test');
-    const c = collect();
+  ov.querySelector('#st-test').onclick = async () => {
+    const btn = ov.querySelector('#st-test');
+    const c = collectAI();
     if (!c.baseURL || !c.apiKey) { toast('请先填 API 地址和 Key'); return; }
-    t.textContent = '测试中…'; t.disabled = true;
+    btn.textContent = '测试中…'; btn.disabled = true;
     const r = await api.cloudConfigTest(c);
-    t.textContent = '测试连接'; t.disabled = false;
+    btn.textContent = tr('测试连接'); btn.disabled = false;
     toast(r.ok ? '✓ 连接成功，可以开始识别' : '✗ ' + r.error, r.ok ? 2200 : 5000);
   };
-  ov.querySelector('#cc-save').onclick = async () => {
-    const c = collect();
-    if (!c.baseURL || !c.apiKey || !c.model) { toast('请填完整：API 地址、Key、模型名'); return; }
+
+  /* 外观 */
+  const sizeRange = ov.querySelector('#st-size');
+  const sizeVal = ov.querySelector('#st-size-val');
+  sizeRange.oninput = () => {
+    sizeVal.textContent = sizeRange.value;
+    document.documentElement.style.setProperty('--cell', sizeRange.value + 'px');
+  };
+
+  /* 更新 */
+  const autoBtn = ov.querySelector('#st-auto');
+  autoBtn.onclick = () => {
+    const on = !autoBtn.classList.contains('on');
+    autoBtn.classList.toggle('on', on);
+    autoBtn.setAttribute('aria-pressed', String(on));
+  };
+  const updBtn = ov.querySelector('#st-upd');
+  if (updBtn) {
+    updBtn.onclick = async () => {
+      updBtn.disabled = true;
+      updBtn.textContent = '检查中…';
+      const r = await api.updateCheck();
+      updBtn.disabled = false;
+      updBtn.textContent = tr('检查更新');
+      if (r && r.ok) {
+        if (r.version && r.version !== String(info.version || '')) toast(`${tr('发现新版本')} v${r.version}`);
+        else toast(tr('当前已是最新版本'));
+      } else {
+        toast('检查更新失败：' + ((r && r.error) || '未知错误'));
+      }
+    };
+  }
+  const openDir = ov.querySelector('#st-opendir');
+  if (openDir) openDir.onclick = async () => { await api.openDataDir(); };
+
+  /* 保存 */
+  ov.querySelector('#st-cancel').onclick = () => {
+    document.documentElement.style.setProperty('--cell', state.size + 'px');
+    ov.remove();
+  };
+  ov.querySelector('#st-save').onclick = async () => {
+    const c = collectAI();
+    const filled = !!(c.baseURL || c.apiKey || c.model);
+    if (filled && (!c.baseURL || !c.apiKey || !c.model)) {
+      toast('AI 配置不完整：API 地址、Key、模型名都要填');
+      return;
+    }
     await api.cloudConfigSet(c);
     state.flags.cloudAI = c;
+    const autoOn = autoBtn.classList.contains('on');
+    await api.setFlag('autoUpdateCheck', autoOn);
+    state.flags.autoUpdateCheck = autoOn;
+    state.size = Math.max(110, Math.min(300, Number(sizeRange.value) || 168));
+    await api.setFlag('thumbSize', state.size);
+    const lang = ov.querySelector('#st-lang').value;
+    await api.setFlag('lang', lang);
+    state.flags.lang = lang;
+    setLanguage(lang);
+    renderSidebar();
+    renderContent();
+    syncSelectionUI();
+    updatePill();
     ov.remove();
-    toast('AI 设置已保存');
+    toast(tr('设置已保存'));
   };
 }
+
+/* 兼容旧调用：需要直接打开 AI 配置的地方 */
+function cloudConfigModal() { return settingsModal('ai'); }
 
 /* ================= 批量标注分类（数据标注式） ================= */
 async function categoryModal() {
@@ -1501,6 +1946,46 @@ async function categoryModal() {
 }
 
 
+/* ================= 重命名 AI 分类（= 相册名） ================= */
+function renameCategoryModal(from) {
+  const groups = [...new Set(state.images.map(i => i.aiClusterName).filter(Boolean))].sort();
+  const others = groups.filter(g => g !== from);
+  const ov = showModal(`<h3>${tr('重命名分类')}</h3>
+    <p class="hint" style="margin-bottom:10px">改名后该分类下所有图片会一起更新；重新跑 AI 也不会覆盖。</p>
+    <div class="row">
+      <label class="f-label">分类名称</label>
+      <input type="text" id="rc-name" value="${esc(from || '')}" placeholder="例如：原神·雷电将军">
+    </div>
+    ${others.length ? `<div class="row">
+      <label class="f-label">或合并到已有分类</label>
+      <div class="check-list">${others.map(g => `<label><input type="radio" name="rc-target" value="${esc(g)}"><span>${esc(g)}</span></label>`).join('')}</div>
+    </div>` : ''}
+    <div class="modal-foot">
+      <button class="chip" id="rc-cancel">${tr('取消')}</button>
+      <button class="btn-primary" id="rc-ok">${tr('保存')}</button>
+    </div>`);
+  const input = ov.querySelector('#rc-name');
+  input.focus();
+  input.select();
+  const save = async () => {
+    const picked = ov.querySelector('input[name="rc-target"]:checked');
+    const to = (input.value.trim() || (picked ? picked.value : '')).trim();
+    if (!to) { toast('请输入新的分类名'); return; }
+    if (to === from) { ov.remove(); return; }
+    const r = await api.renameCategory(from, to);
+    if (r && r.error) { toast('改名失败：' + r.error); return; }
+    ov.remove();
+    if (state.view.type === 'aicat' && state.view.key === from) {
+      state.view = { type: 'aicat', key: to };
+    }
+    await refreshLibrary();
+    toast(`已重命名为「${to}」，共 ${r.count || 0} 张`);
+  };
+  ov.querySelector('#rc-cancel').onclick = () => ov.remove();
+  ov.querySelector('#rc-ok').onclick = save;
+  input.onkeydown = e => { if (e.key === 'Enter') save(); };
+}
+
 /* ================= 初始化 ================= */
 (async function init() {
   const lib = await api.getLibrary();
@@ -1509,6 +1994,11 @@ async function categoryModal() {
   state.folders = lib.folders;
   state.flags = lib.flags;
   rebuildIndex();
+  // 语言：优先用设置里保存的，其次本地缓存
+  const savedLang = lib.flags.lang || localStorage.getItem('pf.lang') || 'zh-CN';
+  LANG = LANGS.some(l => l.id === savedLang) ? savedLang : 'zh-CN';
+  if (lib.flags.thumbSize) state.size = Math.max(110, Math.min(300, Number(lib.flags.thumbSize) || 168));
+  applyLangUI();
   syncNsfwButton();
   renderSidebar();
   renderContent();
@@ -1578,28 +2068,28 @@ async function categoryModal() {
     ubState = d.state;
     if (d.state === 'available') {
       ubVersion = d.version || '';
-      ubText.textContent = `发现新版本 v${d.version}`;
-      ubBtn.textContent = '下载更新';
+      ubText.textContent = `${tr('发现新版本')} v${d.version}`;
+      ubBtn.textContent = tr('下载更新');
       ubBtn.disabled = false;
       ubProg.classList.remove('on');
       ubInner.style.width = '0%';
       ub.classList.remove('hidden');
     } else if (d.state === 'downloaded') {
-      ubText.textContent = `v${d.version} 已下载完成，重启即可安装`;
-      ubBtn.textContent = '重启安装';
+      ubText.textContent = `v${d.version} ${tr('已下载完成，重启即可安装')}`;
+      ubBtn.textContent = tr('重启安装');
       ubBtn.disabled = false;
       ubProg.classList.remove('on');
       ub.classList.remove('hidden');
     } else if (d.state === 'latest') {
       if (!ub.classList.contains('hidden') && ubState !== 'checking') {
-        ubText.textContent = '当前已是最新版本';
-        ubBtn.textContent = '关闭';
+        ubText.textContent = tr('当前已是最新版本');
+        ubBtn.textContent = tr('关闭');
         ubBtn.disabled = false;
         setTimeout(() => { if (ubState === 'latest') ub.classList.add('hidden'); }, 2600);
       }
     } else if (d.state === 'error') {
-      ubText.textContent = '检查更新失败：' + (d.error || '').slice(0, 40);
-      ubBtn.textContent = '重试';
+      ubText.textContent = tr('检查更新失败') + '：' + (d.error || '').slice(0, 40);
+      ubBtn.textContent = tr('重试');
       ubBtn.disabled = false;
       ub.classList.remove('hidden');
     }
@@ -1610,15 +2100,15 @@ async function categoryModal() {
     ubProg.classList.add('on');
     ubInner.style.width = Math.max(0, Math.min(100, d.percent || 0)) + '%';
     const mb = n => (n / 1024 / 1024).toFixed(1);
-    ubText.textContent = `正在下载 v${ubVersion}… ${d.percent || 0}%（${mb(d.transferred || 0)}/${mb(d.total || 0)}MB）`;
-    ubBtn.textContent = '下载中…';
+    ubText.textContent = `${tr('正在下载')} v${ubVersion}… ${d.percent || 0}%（${mb(d.transferred || 0)}/${mb(d.total || 0)}MB）`;
+    ubBtn.textContent = tr('下载中…');
     ubBtn.disabled = true;
   });
   $('#ub-close').onclick = () => ub.classList.add('hidden');
   ubBtn.onclick = async () => {
     if (ubState === 'available') {
       ubBtn.disabled = true;
-      ubBtn.textContent = '准备下载…';
+      ubBtn.textContent = tr('准备下载…');
       ubProg.classList.add('on');
       const r = await api.updateDownload();
       if (r && r.error) toast('下载失败：' + r.error);
