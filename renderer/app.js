@@ -138,6 +138,7 @@ const state = {
   size: 168,
   items: [],
   lbIndex: -1,
+  lbPath: null,   // 灯箱跟着「路径」走：网格重排后 index 会失效，标记完 NSFW 再按 N 会切错图
   lastIdx: -1,
   scanning: false,
   scanDone: 0, scanTotal: 0,
@@ -959,12 +960,13 @@ async function openLightbox(idx) {
   const it = state.items[idx];
   if (!it) return;
   state.lbIndex = idx;
+  state.lbPath = it.path;
   lbResetZoom();
   $('#lightbox').classList.remove('hidden');
   const cached = thumbCache.get(it.path);
   $('#lb-img').src = cached || '';
   const full = await api.readImage(it.path);
-  if (full && state.lbIndex === idx) $('#lb-img').src = full.dataUrl;
+  if (full && state.lbPath === it.path) $('#lb-img').src = full.dataUrl;
   renderLbPanel(it);
 }
 function closeLightbox() {
@@ -974,6 +976,7 @@ function closeLightbox() {
   if (document.fullscreenElement) { try { document.exitFullscreen(); } catch (e) {} }
   $('#lb-img').src = '';
   state.lbIndex = -1;
+  state.lbPath = null;
 }
 /* 全屏查看：图片铺满窗口（按钮 / F 键触发；单击图片是放大，不再用双击） */
 function toggleLightboxFullscreen() {
@@ -996,25 +999,26 @@ function toggleLightboxFullscreen() {
 function lbNav(d) {
   const n = state.items.length;
   if (!n) return;
-  openLightbox((state.lbIndex + d + n) % n);
+  const at = state.items.findIndex(i => i.path === state.lbPath);
+  openLightbox(((at < 0 ? state.lbIndex : at) + d + n) % n);
+}
+/* 灯箱当前图片：优先按路径找，index 只是兜底 */
+function lbCurrent() {
+  return (state.lbPath && byPath.get(state.lbPath)) || state.items[state.lbIndex] || null;
 }
 function renderLbPanel(it) {
   const albums = state.albums.filter(a => (a.paths || []).includes(it.path));
-  const starCls = it.starred ? ' on star-on' : '';
-  const nsfwCls = it.nsfw ? ' on nsfw-on' : '';
   $('#lb-panel').innerHTML = `
     <div class="lb-name" title="${esc(it.path)}">${esc(baseName(it.path))}</div>
     <div class="lb-tools">
-      <button id="lb-star"${starCls}>${it.starred ? '★ ' + tr('已星标') : '☆ ' + tr('加星标')}</button>
-      <button id="lb-nsfw"${nsfwCls}>${it.nsfw ? '🔞 NSFW' : tr('🔞 标记 NSFW')}</button>
+      <button id="lb-star" class="${it.starred ? 'on star-on' : ''}">${it.starred ? '★ ' + tr('已星标') : '☆ ' + tr('加星标')}</button>
+      <button id="lb-nsfw" class="${it.nsfw ? 'on nsfw-on' : ''}">${it.nsfw ? '🔞 NSFW' : tr('🔞 标记 NSFW')}</button>
     </div>
     <div class="lb-aicat">
       <span class="lb-aicat-lbl">${tr('AI 分类')}</span>
-      <select id="lb-aicat-sel" class="lb-select">
-        <option value="">${tr('未分类')}</option>
-        ${dynamicCats().map(c => `<option value="${esc(c)}"${it.aiClusterName === c ? ' selected' : ''}>${esc(c)}</option>`).join('')}
-      </select>
-      ${it.aiManual ? `<span class="lb-manual" title="已手动纠正，重新跑 AI 不会覆盖">${tr('手动')}</span>` : ''}
+      <button class="lb-cat-chip${it.aiClusterName ? '' : ' empty'}" id="lb-cat-chip" title="${tr('点击标注这张图的分类')}">${it.aiClusterName ? esc(it.aiClusterName) : tr('未分类')}</button>
+      ${it.aiManual ? `<span class="lb-manual" title="${tr('已手动标注，重新跑 AI 不会覆盖')}">${tr('手动')}</span>` : ''}
+      <button class="chip lb-cat-btn" id="lb-label">✎ ${tr('标注')}</button>
     </div>
     <div class="lb-info">
       <div><span>${tr('拍摄时间')}</span><b>${it.exifDate ? fmtDate(it.exifDate) : '—'}</b></div>
@@ -1060,18 +1064,14 @@ function renderLbPanel(it) {
     await api.updateImage(it.path, { note: it.note });
     toast('备注已保存');
   };
-  $('#lb-aicat-sel').onchange = async e => {
-    const v = e.target.value;
-    it.aiClusterName = v || null;
-    it.aiCategory = v || null;
-    it.aiManual = !!v;
-    it.aiConf = null;
-    await api.updateImage(it.path, { aiClusterName: v, aiCategory: v, aiManual: !!v });
+  /* 手动标注分类：像数据标注一样把这图归到某个 AI 分类（aiManual=true，AI 不再覆盖） */
+  const openLabel = () => labelModal([it.path], () => {
     renderLbPanel(it);
     renderSidebar();
-    renderGrid();
-    toast(v ? `已改为「${v}」` : '已清除分类');
-  };
+    renderContent();
+  });
+  $('#lb-cat-chip').onclick = openLabel;
+  $('#lb-label').onclick = openLabel;
   $('#lb-folder').onclick = () => api.openInFolder(it.path);
   $('#lb-star').onclick = async () => { await toggleStar(it.path); renderLbPanel(it); };
   $('#lb-nsfw').onclick = async () => { await toggleNsfw(it.path); renderLbPanel(it); };
@@ -1514,12 +1514,12 @@ function showGuide() {
   const ov = showModal(`<h3>使用引导</h3>
     <div class="g-step"><span class="g-num">1</span><div><b>导入图片</b>
       <p>点击右上角「扫描文件夹」，选择存放图片的目录。PicFlow 会自动扫描所有子文件夹中的 JPG / PNG / WebP / GIF / BMP 图片，并生成缩略图缓存。</p></div></div>
-    <div class="g-step"><span class="g-num">2</span><div><b>浏览与智能分类</b>
-      <p>图片按拍摄日期（优先 EXIF）与文件类型自动归类。左侧「智能分类」可点击 <b>运行 AI 分类</b>，应用内置的轻量模型（MobileNet，完全离线）会把图片自动归入 <b>角色图 / 风景图 / 插画·CG / 动物·萌宠 / 物品·道具 / 美食 / 截图 / 其他</b>，分错的可在图片详情面板手动纠正。顶部搜索框支持文件名、标签、备注关键词；已扫描的文件夹有新图时会自动同步进图库。</p></div></div>
+    <div class="g-step"><span class="g-num">2</span><div><b>浏览与 AI 分类</b>
+      <p>图片按拍摄日期（优先 EXIF）与文件类型自动归类。先在 <b>设置 → AI 识别</b> 填好自己的多模态大模型 API（OpenAI / Claude / DeepSeek / 通义 / Kimi / 豆包等），再点左侧 <b>AI 分类</b> 运行识别，图片会按内容自动归入一批分类相册。分类名可在总览卡片右上角 <b>✎</b> 修改，也能合并到已有分类。顶部搜索框支持文件名、标签、备注关键词。</p></div></div>
     <div class="g-step"><span class="g-num">3</span><div><b>星标与 NSFW</b>
-      <p>悬停缩略图点右上角 <b>★</b> 加星标；NSFW 图片可手动标记（缩略图右下角红角标）。顶部 <b>NSFW 已隐藏</b> 开关一键隐藏/显示所有 NSFW 图片。</p></div></div>
-    <div class="g-step"><span class="g-num">4</span><div><b>整理与预览</b>
-      <p>左上角圆圈选中（Ctrl 多选 / Shift 范围选），底部工具条批量打标签、星标、相册、移动、重命名、移出（进软件回收站可恢复）。单击图片看大图，<b>右上角红色 ✕</b> 或 <b>Esc</b> 关闭预览。「重复 / 相似」视图可一键清理重复图片。</p></div></div>
+      <p>悬停缩略图点右上角 <b>★</b> 加星标；NSFW 图片可手动标记（缩略图右下角红角标）。顶部 <b>NSFW 已隐藏</b> 开关一键隐藏/显示所有 NSFW 图片；敏感图只在本地判定，不会被发到云端 API。</p></div></div>
+    <div class="g-step"><span class="g-num">4</span><div><b>整理与看图</b>
+      <p>左上角圆圈选中（Ctrl 多选 / Shift 范围选），底部工具条批量打标签、星标、相册、移动、重命名、移出（进软件回收站可恢复）。单击图片打开灯箱：<b>滚轮缩放</b>、<b>双击进全屏</b>、全屏下<b>单击放大</b>看细节、<b>Esc</b> 退出。「重复 / 相似」视图可一键清理重复图片。</p></div></div>
     <div class="modal-foot"><button class="btn-primary" id="guide-ok">开始使用</button></div>`);
   ov.querySelector('#guide-ok').onclick = () => { ov.remove(); api.setFlag('guided', true); };
 }
@@ -1543,10 +1543,12 @@ document.addEventListener('keydown', e => {
     if (e.key === 'ArrowRight') lbNav(1);
     if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleLightboxFullscreen(); }
     if (e.key === '1') { e.preventDefault(); lbSnapNative(); }
-    if (state.lbIndex >= 0 && state.items[state.lbIndex]) {
-      const it = state.items[state.lbIndex];
+    const lit = lbCurrent();
+    if (lit) {
+      const it = lit;
       if (e.key === 's' || e.key === 'S') { e.preventDefault(); toggleStar(it.path).then(() => renderLbPanel(it)); }
       if (e.key === 'n' || e.key === 'N') { e.preventDefault(); toggleNsfw(it.path).then(() => renderLbPanel(it)); }
+      if (e.key === 'c' || e.key === 'C') { e.preventDefault(); labelModal([it.path], () => { renderLbPanel(it); renderSidebar(); renderContent(); }); }
     }
     return;
   }
@@ -1903,46 +1905,131 @@ async function settingsModal(initialTab = 'general') {
 function cloudConfigModal() { return settingsModal('ai'); }
 
 /* ================= 批量标注分类（数据标注式） ================= */
+/* ================= 手动标注 AI 分类（数据标注式） =================
+ * 给一张或多张图手动指定「AI 分类」里的某个文件夹，写 aiManual=true，
+ * 之后重跑 AI 识别会跳过这些图，不会覆盖人的判断。
+ */
+function labelModal(paths, after) {
+  const list = (Array.isArray(paths) ? paths : [paths]).filter(Boolean);
+  if (!list.length) return;
+  const imgs = list.map(p => byPath.get(p)).filter(Boolean);
+  const single = list.length === 1 ? imgs[0] : null;
+
+  const counts = new Map();
+  for (const i of state.images) if (i.aiClusterName) counts.set(i.aiClusterName, (counts.get(i.aiClusterName) || 0) + 1);
+  const cats = [...counts.keys()].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+
+  const uniq = new Set(imgs.map(i => i.aiClusterName || ''));
+  let picked = uniq.size === 1 ? [...uniq][0] : null; // null = 多张且分类不一致
+  let pickedIsNew = false;
+
+  const ov = showModal(`
+    <h3>${single ? tr('标注分类') : `${tr('批量标注')} · ${list.length} ${tr('张')}`}</h3>
+    <p class="hint" style="margin-bottom:12px">${tr('手动标注后重新跑 AI 识别也不会被覆盖。')}</p>
+    ${single ? `<div class="label-preview">
+      <img src="${esc(single.thumbUrl || '')}" alt="">
+      <div class="lp-meta">
+        <div class="lp-name">${esc(baseName(single.path))}</div>
+        <div class="lp-cur">${tr('当前')}：<b>${single.aiClusterName ? esc(single.aiClusterName) : tr('未分类')}</b></div>
+      </div>
+    </div>` : ''}
+    <input id="label-q" class="label-search" type="text" autocomplete="off" spellcheck="false"
+      placeholder="${tr('搜索分类，直接输入可新建…')}">
+    <div class="label-list" id="label-list"></div>
+    <div class="modal-foot">
+      <button class="chip danger" id="label-clear">${tr('清除标注')}</button>
+      <button class="chip" id="label-cancel">${tr('取消')}</button>
+      <button class="btn-primary" id="label-ok">${tr('应用')}</button>
+    </div>`);
+
+  const q = ov.querySelector('#label-q');
+  const listEl = ov.querySelector('#label-list');
+
+  const rowsHtml = () => {
+    const kw = q.value.trim();
+    const hit = kw ? cats.filter(c => c.toLowerCase().includes(kw.toLowerCase())) : cats;
+    let h = '';
+    if (!kw) h += `<button class="label-row${picked === '' && !pickedIsNew ? ' sel' : ''}" data-cat=""><span class="lr-name muted">${tr('未分类 / 清除')}</span></button>`;
+    for (const c of hit) {
+      h += `<button class="label-row${!pickedIsNew && picked === c ? ' sel' : ''}" data-cat="${esc(c)}">
+        <span class="lr-name">${esc(c)}</span><span class="lr-cnt">${counts.get(c) || 0}</span></button>`;
+    }
+    if (kw && !cats.includes(kw)) {
+      h += `<button class="label-row new${pickedIsNew ? ' sel' : ''}" data-new="1">
+        ＋ ${tr('新建分类')}「${esc(kw)}」</button>`;
+    }
+    if (!hit.length && !kw) h += `<div class="hint" style="padding:10px 2px">${tr('还没有分类，直接输入名字新建')}</div>`;
+    return h;
+  };
+  const paint = () => { listEl.innerHTML = rowsHtml(); };
+  paint();
+
+  q.oninput = () => { pickedIsNew = false; paint(); };
+  q.onkeydown = e => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const kw = q.value.trim();
+      if (kw && !cats.includes(kw)) { apply(kw); return; }
+      apply(picked);
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const all = [...listEl.querySelectorAll('.label-row')];
+      if (!all.length) return;
+      const at = all.findIndex(el => el.classList.contains('sel'));
+      const next = e.key === 'ArrowDown' ? Math.min(all.length - 1, at + 1) : Math.max(0, at - 1);
+      all[next].click();
+      all[next].scrollIntoView({ block: 'nearest' });
+    }
+  };
+
+  listEl.onclick = e => {
+    const row = e.target.closest('.label-row');
+    if (!row) return;
+    if (row.dataset.new) { pickedIsNew = true; picked = q.value.trim(); }
+    else { pickedIsNew = false; picked = row.dataset.cat || ''; }
+    paint();
+    q.focus();
+  };
+  listEl.ondblclick = e => {
+    const row = e.target.closest('.label-row');
+    if (!row) return;
+    if (row.dataset.new) apply(q.value.trim()); else apply(row.dataset.cat || '');
+  };
+
+  ov.querySelector('#label-cancel').onclick = () => ov.remove();
+  ov.querySelector('#label-clear').onclick = () => apply('');
+
+  async function apply(target) {
+    if (target === null) { toast(tr('请先选一个分类')); return; }
+    await api.batchSetCategory(list, target);
+    for (const p of list) {
+      const it = byPath.get(p);
+      if (!it) continue;
+      it.aiClusterName = target || '';
+      it.aiCategory = target || '';
+      it.aiManual = !!target;
+      it.aiConf = null;
+    }
+    ov.remove();
+    if (after) after(target);
+    toast(target ? `${tr('已标注为')}「${target}」` : tr('已清除分类标注'));
+  }
+
+  ov.querySelector('#label-ok').onclick = () => {
+    const kw = q.value.trim();
+    if (pickedIsNew || (kw && !cats.includes(kw) && kw)) { apply(kw); return; }
+    apply(picked);
+  };
+  setTimeout(() => q.focus(), 40);
+}
+
 async function categoryModal() {
   const paths = [...state.selected];
   if (!paths.length) return;
-  const cats = [...new Set(state.images.map(i => i.aiCategory).filter(Boolean))].sort();
-  const ov = showModal(`<h3>标注分类（${paths.length} 张）</h3>
-    <p class="hint" style="margin-bottom:10px">手动指定分类后，AI 识别不会覆盖你的标注。</p>
-    <div class="row">
-      <label class="f-label">选择已有分类</label>
-      <div class="check-list">${cats.length
-        ? cats.map(c => `<label><input type="radio" name="cat-target" value="${esc(c)}"><span>${esc(c)}</span></label>`).join('')
-        : '<div class="hint">还没有分类，在下方输入新建一个</div>'}</div>
-    </div>
-    <div class="row">
-      <label class="f-label">或输入新分类</label>
-      <input type="text" id="cat-new" placeholder="例如：原神·雷电将军 / 代码截图">
-    </div>
-    <div class="modal-foot">
-      <button class="chip" id="cat-cancel">取消</button>
-      <button class="chip danger" id="cat-clear">清除标注</button>
-      <button class="btn-primary" id="cat-ok">应用</button>
-    </div>`);
-  ov.querySelector('#cat-cancel').onclick = () => ov.remove();
-  ov.querySelector('#cat-clear').onclick = async () => {
-    await api.batchSetCategory(paths, '');
-    ov.remove();
+  labelModal(paths, async () => {
     state.selected.clear();
     await refreshLibrary();
-    toast('已清除 ' + paths.length + ' 张的分类标注');
-  };
-  ov.querySelector('#cat-ok').onclick = async () => {
-    const newVal = ov.querySelector('#cat-new').value.trim();
-    const picked = ov.querySelector('.check-list input:checked');
-    const target = newVal || (picked ? picked.value : '');
-    if (!target) { toast('请选择分类或输入新分类名'); return; }
-    await api.batchSetCategory(paths, target);
-    ov.remove();
-    state.selected.clear();
-    await refreshLibrary();
-    toast(`已把 ${paths.length} 张标注为「${target}」`);
-  };
+  });
 }
 
 
