@@ -11,6 +11,7 @@
   <img src="https://img.shields.io/badge/platform-Windows%2010%20%2F%2011-0078D6?style=flat-square" alt="platform">
   <img src="https://img.shields.io/badge/license-MIT-F97316?style=flat-square" alt="license">
   <img src="https://img.shields.io/badge/AI-Cloud%20Vision-8B5CF6?style=flat-square" alt="ai">
+  <br>
   <img src="https://img.shields.io/badge/NSFW-Local%20only-E11D48?style=flat-square" alt="nsfw">
   <img src="https://img.shields.io/badge/i18n-4%20languages-0EA5E9?style=flat-square" alt="i18n">
   <img src="https://img.shields.io/badge/update-GitHub%20Release-16A34A?style=flat-square" alt="update">
