@@ -1,7 +1,7 @@
 'use strict';
 // 必须在最早期设置：主进程 I/O 线程池太小会让批量缩略图读盘排队（默认 4）
 process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || '16';
-const { app, BrowserWindow, ipcMain, dialog, shell, nativeImage, protocol } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, nativeImage, protocol, clipboard, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const fsp = require('fs/promises');
@@ -599,7 +599,45 @@ ipcMain.handle('remove-from-album', (e, id, paths) => { DB.removeFromAlbum(id, p
 ipcMain.handle('open-in-folder', (e, p) => { shell.showItemInFolder(p); return { ok: true }; });
 ipcMain.handle('set-flag', (e, k, v) => { DB.setFlag(k, v); return { ok: true }; });
 
-/* ---------------- AI 智能分类（本地离线推理） ---------------- */
+/* 右键菜单用到的系统能力 */
+// 复制图片本体到剪贴板：nativeImage 支持 png/jpg/bmp，webp/gif 返回空图要告诉用户
+ipcMain.handle('copy-image', (e, p) => {
+  try {
+    const img = nativeImage.createFromPath(p);
+    if (img.isEmpty()) return { ok: false, error: '该格式无法复制为图片' };
+    clipboard.writeImage(img);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err.message || err) };
+  }
+});
+ipcMain.handle('copy-text', (e, t) => { clipboard.writeText(String(t == null ? '' : t)); return { ok: true }; });
+ipcMain.handle('open-path', async (e, p) => {
+  try {
+    const err = await shell.openPath(p);
+    return err ? { ok: false, error: err } : { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err.message || err) };
+  }
+});
+// 输入框里右键：走系统原生编辑菜单（撤销/剪切/复制/粘贴/全选），
+// Electron 默认不提供，不补的话搜索框里没法右键粘贴。
+ipcMain.handle('show-edit-menu', (e, labels = {}) => {
+  const menu = Menu.buildFromTemplate([
+    { role: 'undo', label: labels.undo || 'Undo' },
+    { role: 'redo', label: labels.redo || 'Redo' },
+    { type: 'separator' },
+    { role: 'cut', label: labels.cut || 'Cut' },
+    { role: 'copy', label: labels.copy || 'Copy' },
+    { role: 'paste', label: labels.paste || 'Paste' },
+    { type: 'separator' },
+    { role: 'selectAll', label: labels.selectAll || 'Select all' }
+  ]);
+  const w = BrowserWindow.fromWebContents(e.sender);
+  menu.popup(w ? { window: w } : {});
+  return { ok: true };
+});
+
 /* ---------------- AI 智能分类（云端多模态大模型） ----------------
  * v1.4 起本地识别模型（MobileNetV2 / WD14）全部移除：
  *   角色/作品识别改由用户自己的多模态大模型 API 完成（见 cloudai.js）。

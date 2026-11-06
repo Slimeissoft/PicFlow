@@ -899,3 +899,75 @@ body {
   #content { padding: 14px 12px 130px; }
   .view-title { font-size: 19px; }
 }
+
+/* ============================================================
+ * 右键菜单（自绘：跟主题、带缩略图、支持二级菜单）
+ * ============================================================ */
+.ctx-menu {
+  position: fixed; z-index: 150;
+  min-width: 232px; max-width: 300px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto; overflow-x: hidden;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-lg), 0 0 0 1px rgba(17,24,39,.02);
+  user-select: none;
+  animation: ctx-in .12s var(--ease);
+}
+@keyframes ctx-in { from { opacity: 0; transform: scale(.97) translateY(-3px); } }
+.ctx-menu::-webkit-scrollbar { width: 8px; }
+
+.ctx-head {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 8px 9px; margin-bottom: 4px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.ctx-thumb {
+  width: 36px; height: 36px; flex: 0 0 36px;
+  border-radius: 8px; object-fit: cover;
+  background: var(--chip); border: 1px solid var(--border-soft);
+}
+.ctx-thumb-blank { display: block; }
+.ctx-meta { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ctx-meta b {
+  font-size: 12.5px; font-weight: 600; color: var(--text);
+  max-width: 196px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ctx-meta span { font-size: 11px; color: var(--muted); }
+
+.ctx-item {
+  display: flex; align-items: center; gap: 9px;
+  height: 32px; padding: 0 9px;
+  border-radius: 8px; cursor: default;
+  font-size: 12.5px; color: var(--text);
+  transition: background .1s, color .1s;
+}
+.ctx-item:hover, .ctx-item.active, .ctx-item.open {
+  background: var(--accent-soft); color: var(--accent-dark);
+}
+.ctx-item.danger { color: var(--danger); }
+.ctx-item.danger:hover, .ctx-item.danger.active { background: #fef2f2; color: #b91c1c; }
+.ctx-item.disabled { opacity: .38; pointer-events: none; }
+.ctx-ico {
+  width: 16px; height: 16px; flex: 0 0 16px;
+  display: grid; place-items: center; color: var(--muted);
+}
+.ctx-item:hover .ctx-ico, .ctx-item.active .ctx-ico, .ctx-item.open .ctx-ico { color: inherit; }
+.ctx-ico svg { width: 15px; height: 15px; display: block; }
+.ctx-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctx-hint { font-size: 10.5px; color: var(--muted-2); letter-spacing: .02em; }
+.ctx-check { font-size: 12px; color: var(--accent); margin-right: 2px; }
+.ctx-arrow {
+  width: 0; height: 0; flex: 0 0 auto;
+  border-left: 4.5px solid currentColor;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  opacity: .5;
+}
+.ctx-sep { height: 1px; margin: 4px 8px; background: var(--border-soft); }
+
+/* 右键命中的卡片：跟「已选中」区分开，用虚线强调当前菜单作用对象 */
+.card.ctx-target { outline: 2px dashed var(--accent); outline-offset: -2px; }
+.stack-card.ctx-target .stack-thumb { box-shadow: 0 0 0 2px var(--accent); }

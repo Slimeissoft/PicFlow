@@ -106,7 +106,7 @@ function applyLangUI() {
   if (hb) {
     hb.textContent = state.multi
       ? tr('点击图片 选中/取消 · Shift+点击 范围选择 · 选好后用底部操作条批量处理 · 点「完成选择」退出')
-      : tr('单击 预览 · 开启右上「多选」后点击图片直接选中 · Ctrl+A 全选 · Del 移出');
+      : tr('单击 预览 · 右键 更多操作 · 开启右上「多选」后点击图片直接选中 · Ctrl+A 全选 · Del 移出');
   }
 }
 
@@ -185,6 +185,8 @@ async function refreshLibrary() {
   rebuildIndex();
   state.dupStale = true;
   renderSidebar(); renderContent();
+  /* 对象已整批换新，灯箱面板若开着必须跟着换，否则会停在旧对象的显示状态 */
+  lbPanelRefresh();
 }
 async function loadThumb(p, imgEl) {
   if (!imgEl) return;
@@ -739,26 +741,406 @@ $('#grid').addEventListener('click', e => {
   openLightbox(idx);
 });
 
-async function toggleStar(p) {
-  const it = byPath.get(p);
-  if (!it) return;
-  it.starred = !it.starred;
-  await api.updateImage(p, { starred: !!it.starred });
+/* ================= 右键菜单 =================
+ * 自绘菜单而不是 Electron 原生 Menu：能跟主题走、能直接用 i18n、菜单头还能带缩略图。
+ * 所有动作复用现有的批量函数，只是把作用对象从 state.selected 换成右键点中的这批图片。
+ */
+const CTX_ICON = {
+  eye: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M2 12s3.6-6.4 10-6.4S22 12 22 12s-3.6 6.4-10 6.4S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/></svg>',
+  external: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg>',
+  folder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
+  image: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="m4 17 5-4.4 4.5 3.4L17 12l4 4"/></svg>',
+  link: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M9.5 14.5 14.5 9.5"/><path d="M7 12l-1.4 1.4a3.5 3.5 0 0 0 5 5L12 17"/><path d="M12 7l1.4-1.4a3.5 3.5 0 0 1 5 5L17 12"/></svg>',
+  star: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m12 3 2.7 5.8 6.3.8-4.6 4.3 1.2 6.1L12 17l-5.6 3 1.2-6.1L3 9.6l6.3-.8z"/></svg>',
+  nsfw: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3 4 6v6c0 4.5 3.2 7.7 8 9 4.8-1.3 8-4.5 8-9V6z"/><path d="M9 15V9m0 3h2a1.5 1.5 0 0 0 0-3H9"/><path d="M15 9v6"/></svg>',
+  tag: ICONS.tag,
+  album: ICONS.album,
+  plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 5v14M5 12h14"/></svg>',
+  edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 20h4L18.5 9.5a2 2 0 0 0 0-2.8L17.3 5.5a2 2 0 0 0-2.8 0L4 16z"/><path d="m13.5 6.5 4 4"/></svg>',
+  move: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3v18M3 12h18"/><path d="m8 7 4-4 4 4M8 17l4 4 4-4M7 8 3 12l4 4M17 8l4 4-4 4"/></svg>',
+  trash: ICONS.trash,
+  purge: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="8.6"/><path d="m9 9 6 6M15 9l-6 6"/></svg>',
+  restore: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 9a8 8 0 1 1 1.6 6.6"/><path d="M3 4v5h5"/></svg>',
+  eraser: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m7 17.5-3-3a2 2 0 0 1 0-2.9l8-8a2 2 0 0 1 2.9 0l3.5 3.5a2 2 0 0 1 0 2.9l-7.1 7.5z"/><path d="M9 20h11"/></svg>'
+};
+
+const ctx = { el: null, sub: null, items: [], active: -1 };
+
+function ctxCloseSub() {
+  // 兜底清掉所有子菜单：即使 ctx.sub 引用丢了（页面被局部重绘等），也不会留残影
+  $$('.ctx-sub').forEach(el => el.remove());
+  ctx.sub = null;
+  if (ctx.el) ctx.el.querySelectorAll('.ctx-item.open').forEach(r => r.classList.remove('open'));
+}
+
+function ctxClose() {
+  ctxCloseSub();
+  // 幂等：只清 ctx.el 会漏掉异常路径下产生的孤儿节点，直接按类名全清
+  $$('.ctx-menu').forEach(el => el.remove());
+  ctx.el = null;
+  ctx.items = [];
+  ctx.active = -1;
+  $$('.card.ctx-target').forEach(c => c.classList.remove('ctx-target'));
+  document.removeEventListener('pointerdown', ctxOutside, true);
+  document.removeEventListener('keydown', ctxKey, true);
+  document.removeEventListener('scroll', ctxOnScroll, true);
+  window.removeEventListener('resize', ctxClose);
+  window.removeEventListener('blur', ctxClose);
+}
+
+function ctxOutside(e) {
+  if (e.target && e.target.closest && e.target.closest('.ctx-menu')) return;
+  ctxClose();
+}
+function ctxOnScroll(e) {
+  if (e.target && e.target.closest && e.target.closest('.ctx-menu')) return;
+  ctxClose();
+}
+
+function ctxItemHtml(it, i) {
+  if (it.sep) return '<div class="ctx-sep"></div>';
+  if (it.head) {
+    return `<div class="ctx-head">${it.head.thumb
+      ? `<img class="ctx-thumb" src="${esc(it.head.thumb)}" alt="">`
+      : '<span class="ctx-thumb ctx-thumb-blank"></span>'}<div class="ctx-meta"><b>${esc(it.head.title)}</b><span>${esc(it.head.sub)}</span></div></div>`;
+  }
+  const ico = `<span class="ctx-ico">${it.icon ? (CTX_ICON[it.icon] || '') : ''}</span>`;
+  const check = it.checked ? '<span class="ctx-check">✓</span>' : '';
+  const hint = it.hint ? `<span class="ctx-hint">${esc(it.hint)}</span>` : '';
+  const arrow = it.submenu ? '<span class="ctx-arrow"></span>' : '';
+  return `<div class="ctx-item${it.danger ? ' danger' : ''}${it.disabled ? ' disabled' : ''}" data-i="${i}" role="menuitem">${ico}<span class="ctx-label">${esc(it.label)}</span>${check}${hint}${arrow}</div>`;
+}
+
+function ctxRender(items, x, y, targets = []) {
+  ctxClose();
+  const el = document.createElement('div');
+  el.className = 'ctx-menu';
+  el.setAttribute('role', 'menu');
+  el.innerHTML = items.map(ctxItemHtml).join('');
+  document.body.append(el);
+  ctx.el = el; ctx.items = items;
+  // 先上屏量尺寸，再夹进视口，靠近右/下边自动翻转
+  const pad = 8;
+  const w = el.offsetWidth, h = el.offsetHeight;
+  el.style.left = Math.max(pad, Math.min(x, innerWidth - w - pad)) + 'px';
+  el.style.top = Math.max(pad, Math.min(y, innerHeight - h - pad)) + 'px';
+  el.querySelectorAll('.ctx-item').forEach(row => {
+    const it = items[+row.dataset.i];
+    if (!it || it.disabled) return;
+    row.addEventListener('mouseenter', () => { if (it.submenu) ctxOpenSub(row, it); else ctxCloseSub(); });
+    row.addEventListener('click', ev => {
+      ev.stopPropagation();
+      if (it.submenu) { ctxOpenSub(row, it); return; }
+      ctxClose();
+      if (it.action) it.action();
+    });
+  });
+  targets.forEach(c => c.classList.add('ctx-target'));
+  document.addEventListener('pointerdown', ctxOutside, true);
+  document.addEventListener('keydown', ctxKey, true);
+  document.addEventListener('scroll', ctxOnScroll, true);
+  window.addEventListener('resize', ctxClose);
+  window.addEventListener('blur', ctxClose);
+}
+
+function ctxOpenSub(rowEl, item) {
+  if (ctx.sub && ctx.sub._owner === rowEl) return;
+  ctxCloseSub();
+  const sub = document.createElement('div');
+  sub.className = 'ctx-menu ctx-sub';
+  sub.innerHTML = item.submenu.map(ctxItemHtml).join('');
+  document.body.append(sub);
+  const r = rowEl.getBoundingClientRect();
+  const pad = 8;
+  const w = sub.offsetWidth, h = sub.offsetHeight;
+  let left = r.right + 2;
+  if (left + w > innerWidth - pad) left = Math.max(pad, r.left - w - 2);
+  let top = r.top - 5;
+  if (top + h > innerHeight - pad) top = Math.max(pad, innerHeight - h - pad);
+  sub.style.left = left + 'px';
+  sub.style.top = top + 'px';
+  sub._owner = rowEl;
+  ctx.sub = sub;
+  rowEl.classList.add('open');
+  sub.querySelectorAll('.ctx-item').forEach(row => {
+    const it = item.submenu[+row.dataset.i];
+    if (!it || it.disabled) return;
+    row.addEventListener('click', ev => { ev.stopPropagation(); ctxClose(); if (it.action) it.action(); });
+  });
+}
+
+function ctxKey(e) {
+  if (!ctx.el) return;
+  const rows = [...ctx.el.querySelectorAll('.ctx-item')].filter(r => !r.classList.contains('disabled'));
+  if (!rows.length) return;
+  if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); ctxClose(); return; }
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault(); e.stopPropagation();
+    ctx.active = ctx.active < 0 ? 0 : (ctx.active + (e.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length;
+    rows.forEach((r, i) => r.classList.toggle('active', i === ctx.active));
+    const it = ctx.items[+rows[ctx.active].dataset.i];
+    if (it && it.submenu) ctxOpenSub(rows[ctx.active], it); else ctxCloseSub();
+    return;
+  }
+  if (e.key === 'Enter') {
+    e.preventDefault(); e.stopPropagation();
+    const row = rows[ctx.active] || rows[0];
+    const it = ctx.items[+row.dataset.i];
+    if (!it) return;
+    if (it.submenu) { ctxOpenSub(row, it); return; }
+    ctxClose();
+    if (it.action) it.action();
+  }
+}
+
+/* —— 菜单动作 —— */
+async function ctxCopyImage(p) {
+  const r = await api.copyImage(p);
+  toast(r && r.ok ? tr('已复制图片到剪贴板') : `复制失败：${(r && r.error) || '格式不支持'}`);
+}
+async function ctxCopyText(paths) {
+  await api.copyText(paths.length === 1 ? paths[0] : paths.join('\n'));
+  toast(paths.length === 1 ? tr('已复制文件路径') : `${tr('已复制文件路径')} × ${paths.length}`);
+}
+async function ctxSetFlag(paths, key) {
+  const recs = paths.map(p => byPath.get(p)).filter(Boolean);
+  if (!recs.length) return;
+  const target = !recs.every(r => !!r[key]);
+  recs.forEach(r => { r[key] = target; });          // 先给界面反馈
+  try {
+    for (const r of recs) await api.updateImage(r.path, { [key]: target });
+  } catch (err) {
+    paths.forEach(p => { const r = byPath.get(p); if (r) r[key] = !target; });
+    renderSidebar(); renderContent(); lbPanelRefresh();
+    toast(`${key === 'nsfw' ? 'NSFW ' : ''}写入失败：${(err && err.message) || '请重试'}`);
+    return;
+  }
+  paths.forEach(p => { const r = byPath.get(p); if (r) r[key] = target; }); // 防 await 期间换新对象
+  renderSidebar(); renderContent(); lbPanelRefresh();
+  const what = key === 'nsfw' ? 'NSFW 标记' : '星标';
+  toast(target ? `已为 ${paths.length} 张加上${what}` : `已取消 ${paths.length} 张的${what}`);
+}
+
+function ctxAlbumMenu(paths) {
+  const subs = state.albums.map(a => ({
+    label: a.name,
+    icon: 'album',
+    checked: paths.every(p => (a.paths || []).includes(p)),
+    action: async () => {
+      await api.assignAlbum(a.id, paths);
+      await refreshLibrary();
+      toast(`已将 ${paths.length} 张加入「${a.name}」`);
+    }
+  }));
+  if (subs.length) subs.push({ sep: true });
+  subs.push({ label: tr('新建相册') + '…', icon: 'plus', action: () => ctxNewAlbum(paths) });
+  return subs;
+}
+
+function ctxNewAlbum(paths) {
+  const ov = showModal(`<h3>${esc(tr('新建相册'))}</h3>
+    <div class="row"><label class="f-label">${esc(tr('相册名称'))}</label><input type="text" id="cna-name" placeholder="例如：旅行精选"></div>
+    <div class="modal-foot"><button class="chip" id="cna-cancel">${esc(tr('取消'))}</button><button class="btn-primary" id="cna-ok">${esc(tr('创建'))}</button></div>`);
+  const input = ov.querySelector('#cna-name');
+  input.focus();
+  const go = async () => {
+    const name = input.value.trim();
+    if (!name) return;
+    const a = await api.createAlbum(name);
+    await api.assignAlbum(a.id, paths);
+    ov.remove();
+    await refreshLibrary();
+    toast(`已新建相册「${name}」并加入 ${paths.length} 张`);
+  };
+  ov.querySelector('#cna-cancel').onclick = () => ov.remove();
+  ov.querySelector('#cna-ok').onclick = go;
+  input.onkeydown = e => { if (e.key === 'Enter') go(); };
+}
+
+function ctxHeadFor(recs) {
+  if (recs.length === 1) {
+    const it = recs[0];
+    return { head: { thumb: it.thumbUrl || '', title: baseName(it.path), sub: `${imgDate(it).slice(0, 10)} · ${String(it.type || '').toUpperCase()} · ${fmtSize(it.size)}` } };
+  }
+  const sum = recs.reduce((s, i) => s + (i.size || 0), 0);
+  return { head: { thumb: (recs[0] && recs[0].thumbUrl) || '', title: `${tr('已选')} ${recs.length} ${tr('张图片')}`, sub: `${tr('合计')} ${fmtSize(sum)}` } };
+}
+
+function ctxImageItems(paths, opts = {}) {
+  const recs = paths.map(p => byPath.get(p)).filter(Boolean);
+  if (!recs.length) return null;
+  const one = recs.length === 1 ? recs[0] : null;
+  const inTrash = state.view.type === 'trash';
+  const head = ctxHeadFor(recs);
+  const openPreview = () => {
+    const idx = state.items.findIndex(i => i.path === paths[0]);
+    if (idx >= 0) openLightbox(idx);
+  };
+  // 快捷键提示只在真的能按的地方显示：S/N 仅灯箱、F2 仅网格
+  const lb = !!opts.lb;
+
+  if (inTrash) {
+    return [
+      head,
+      { label: tr('打开预览'), icon: 'eye', disabled: !one || !!one.missing, action: openPreview },
+      { label: tr('在文件夹中显示'), icon: 'folder', disabled: !one || !!one.missing, action: () => api.openInFolder(paths[0]) },
+      { sep: true },
+      { label: tr('恢复到图库'), icon: 'restore', action: () => reviveSelected(paths) },
+      { label: tr('清除记录'), icon: 'eraser', action: () => clearRecords(paths) },
+      { sep: true },
+      { label: tr('彻底删除'), icon: 'purge', danger: true, action: () => purgeSelected(paths) }
+    ];
+  }
+
+  const items = [
+    head,
+    { label: tr('打开预览'), icon: 'eye', disabled: !one, action: openPreview },
+    { label: tr('用默认程序打开'), icon: 'external', disabled: !one, action: async () => {
+      const r = await api.openPath(paths[0]);
+      if (r && r.ok === false) toast(`无法打开：${r.error || '未知错误'}`);
+    } },
+    { label: tr('在文件夹中显示'), icon: 'folder', disabled: !one, action: () => api.openInFolder(paths[0]) },
+    { sep: true },
+    { label: tr('复制图片'), icon: 'image', hint: 'Ctrl+C', disabled: !one, action: () => ctxCopyImage(paths[0]) },
+    { label: tr('复制文件路径'), icon: 'link', hint: 'Ctrl+Shift+C', action: () => ctxCopyText(paths) },
+    { sep: true },
+    { label: one && one.starred ? tr('取消星标') : tr('加星标'), icon: 'star', hint: lb ? 'S' : '', action: () => ctxSetFlag(paths, 'starred') },
+    { label: one && one.nsfw ? tr('取消 NSFW 标记') : tr('标记为 NSFW'), icon: 'nsfw', hint: lb ? 'N' : '', action: () => ctxSetFlag(paths, 'nsfw') },
+    { label: tr('标注分类…'), icon: 'tag', action: () => labelModal(paths, () => { lbPanelRefresh(); renderSidebar(); renderContent(); }) },
+    { label: tr('加入相册'), icon: 'album', submenu: ctxAlbumMenu(paths) }
+  ];
+  if (state.view.type === 'album') {
+    items.push({ label: tr('从当前相册移出'), icon: 'eraser', action: () => removeFromCurrentAlbum(paths) });
+  }
+  items.push(
+    { sep: true },
+    { label: tr('重命名') + '…', icon: 'edit', hint: lb ? '' : 'F2', action: () => renameModal(paths) },
+    { label: tr('移动到文件夹…'), icon: 'move', action: () => moveSelected(paths) },
+    { sep: true },
+    { label: tr('移入软件回收站'), icon: 'trash', danger: true, action: () => trashSelected(paths) },
+    { label: tr('彻底删除'), icon: 'purge', danger: true, action: () => purgeSelected(paths) }
+  );
+  return items;
+}
+
+function ctxStackItems(key) {
+  const recs = state.images.filter(i => i.aiClusterName === key && liveVisible(i));
+  return [
+    { head: { thumb: (recs[0] && recs[0].thumbUrl) || '', title: key, sub: pc(recs.length) } },
+    { label: tr('打开分组'), icon: 'folder', action: () => {
+      state.view = { type: 'aicat', key };
+      renderSidebar(); renderContent();
+      const content = $('#content');
+      if (content) content.scrollTop = 0;
+    } },
+    { label: tr('重命名分类') + '…', icon: 'edit', action: () => renameCategoryModal(key) }
+  ];
+}
+
+/* 点中已选中的卡片 → 作用于整个多选；否则只作用于这一张（不打扰现有选择） */
+function ctxPathsFor(p) {
+  if (state.selected.has(p) && state.selected.size > 1) return [...state.selected];
+  return [p];
+}
+
+document.addEventListener('contextmenu', e => {
+  // 输入框：给系统原生编辑菜单，否则 Search 框里右键既没菜单也粘贴不了
+  const editable = e.target.closest('input, textarea, [contenteditable="true"]');
+  if (editable) {
+    e.preventDefault();
+    api.editMenu({ undo: tr('撤销'), redo: tr('重做'), cut: tr('剪切'), copy: tr('复制'), paste: tr('粘贴'), selectAll: tr('全选') });
+    return;
+  }
+  const card = e.target.closest('#grid .card, #dup-root .card');
+  const stack = e.target.closest('#ai-overview-root .stack-card[data-key]');
+  const lbImg = e.target.closest('#lb-img');
+  if (!card && !stack && !lbImg) return;
+  e.preventDefault();
+
+  if (card) {
+    const p = card.dataset.path;
+    if (!p) return;
+    const paths = ctxPathsFor(p);
+    const items = ctxImageItems(paths);
+    if (!items) return;
+    const targets = paths.length > 1
+      ? $$('#grid .card, #dup-root .card').filter(c => paths.includes(c.dataset.path))
+      : [card];
+    return ctxRender(items, e.clientX, e.clientY, targets);
+  }
+  if (stack) {
+    return ctxRender(ctxStackItems(stack.dataset.key), e.clientX, e.clientY, [stack]);
+  }
+  const cur = lbCurrent();
+  if (!cur) return;
+  const items = ctxImageItems(ctxPathsFor(cur.path), { lb: true });
+  if (items) ctxRender(items, e.clientX, e.clientY);
+});
+
+/* 灯箱开着时重画右侧面板（关着就什么都不做） */
+function lbPanelRefresh() {
+  const lb = $('#lightbox');
+  if (!lb || lb.classList.contains('hidden')) return;
+  const cur = lbCurrent();
+  if (cur) renderLbPanel(cur);
+}
+
+/* 只改卡片上的星标，不整页重绘 */
+function paintStar(p, on) {
   $$('#grid .card, #dup-root .card').forEach(c => {
     if (c.dataset.path === p) {
       const b = c.querySelector('.star');
-      if (b) b.classList.toggle('on', !!it.starred);
+      if (b) b.classList.toggle('on', !!on);
     }
   });
+}
+
+async function toggleStar(p) {
+  const it = byPath.get(p);
+  if (!it) return;
+  const target = !it.starred;
+  it.starred = target;              /* 先给界面反馈，写盘失败再回滚 */
+  paintStar(p, target);
+  lbPanelRefresh();
+  try {
+    await api.updateImage(p, { starred: target });
+  } catch (e) {
+    const back = byPath.get(p);
+    if (back) back.starred = !target;
+    paintStar(p, !target);
+    lbPanelRefresh();
+    renderContent();
+    toast('星标写入失败：' + (e && e.message ? e.message : '请重试'));
+    return;
+  }
+  /* 写盘期间若发生 refreshLibrary()，对象已被整批替换 → 把结果补写到新对象上 */
+  const after = byPath.get(p);
+  if (after) after.starred = target;
+  paintStar(p, target);
   renderSidebar();
+  lbPanelRefresh();
 }
 async function toggleNsfw(p) {
   const it = byPath.get(p);
   if (!it) return;
-  it.nsfw = !it.nsfw;
-  await api.updateImage(p, { nsfw: !!it.nsfw });
+  const target = !it.nsfw;
+  it.nsfw = target;                 /* 先给界面反馈，写盘失败再回滚 */
+  lbPanelRefresh();
+  try {
+    await api.updateImage(p, { nsfw: target });
+  } catch (e) {
+    const back = byPath.get(p);
+    if (back) back.nsfw = !target;
+    lbPanelRefresh();
+    renderContent();
+    toast('NSFW 标记写入失败：' + (e && e.message ? e.message : '请重试'));
+    return;
+  }
+  const after = byPath.get(p);
+  if (after) after.nsfw = target;
   renderSidebar();
   renderContent();
+  lbPanelRefresh();
 }
 
 /* 批量标星 / 批量标记 NSFW（按多数状态取反） */
@@ -1007,6 +1389,13 @@ function lbCurrent() {
   return (state.lbPath && byPath.get(state.lbPath)) || state.items[state.lbIndex] || null;
 }
 function renderLbPanel(it) {
+  /* 一律用索引里的最新对象渲染。refreshLibrary()（自动同步/AI 完成后）会把
+     state.images 整批换成新对象，面板若还抓着旧对象，就会出现
+     「已写入图库但按钮没变红」的假死状态 */
+  const fresh = (it && it.path && byPath.get(it.path)) || it || lbCurrent();
+  if (!fresh) return;
+  it = fresh;
+  if (!$('#lb-panel')) return;
   const albums = state.albums.filter(a => (a.paths || []).includes(it.path));
   $('#lb-panel').innerHTML = `
     <div class="lb-name" title="${esc(it.path)}">${esc(baseName(it.path))}</div>
@@ -1073,8 +1462,8 @@ function renderLbPanel(it) {
   $('#lb-cat-chip').onclick = openLabel;
   $('#lb-label').onclick = openLabel;
   $('#lb-folder').onclick = () => api.openInFolder(it.path);
-  $('#lb-star').onclick = async () => { await toggleStar(it.path); renderLbPanel(it); };
-  $('#lb-nsfw').onclick = async () => { await toggleNsfw(it.path); renderLbPanel(it); };
+  $('#lb-star').onclick = () => { toggleStar(it.path); };
+  $('#lb-nsfw').onclick = () => { toggleNsfw(it.path); };
   /* 移出图库（软删）：只改 DB，文件保留，可在回收站恢复 */
   $('#lb-soft-del').onclick = async () => {
     if (!(await confirmModal('移出图片', `将「${baseName(it.path)}」从图库移除？\n文件不会被删除，可在左侧「回收站」中恢复。`, '移出', true))) return;
@@ -1258,8 +1647,7 @@ function renameCurrentAlbum() {
 }
 
 /* 批量打标签 */
-function tagModal() {
-  const paths = [...state.selected];
+function tagModal(paths = [...state.selected]) {
   if (!paths.length) return;
   const allTags = [...new Set(state.images.filter(live).flatMap(i => i.tags || []))];
   const ov = showModal(`<h3>为 ${paths.length} 张图片添加标签</h3>
@@ -1290,8 +1678,7 @@ function tagModal() {
 
 
 /* 加入相册（独占式：一张图只属一个相册） */
-function albumModal() {
-  const paths = [...state.selected];
+function albumModal(paths = [...state.selected]) {
   if (!paths.length) return;
   const ov = showModal(`<h3>将 ${paths.length} 张图片加入相册</h3>
     <div class="row"><label class="f-label">选择目标相册</label>
@@ -1315,29 +1702,28 @@ function albumModal() {
     if (!targetId) { toast('请先勾选一个相册，或在下方新建'); return; }
     await api.assignAlbum(targetId, paths);
     ov.remove();
-    state.selected.clear();
+    paths.forEach(p => state.selected.delete(p));
     syncSelectionUI();
     await refreshLibrary();
     toast(`已将 ${paths.length} 张图片加入相册`);
   };
 }
-async function removeFromCurrentAlbum() {
+async function removeFromCurrentAlbum(paths = [...state.selected]) {
   const a = state.albums.find(x => x.id === state.view.key);
   if (!a) return;
-  await api.removeFromAlbum(a.id, [...state.selected]);
+  await api.removeFromAlbum(a.id, paths);
   await refreshLibrary();
   toast(`已从「${a.name}」移出`);
 }
 
 /* 移动 */
-async function moveSelected() {
-  const paths = [...state.selected];
+async function moveSelected(paths = [...state.selected]) {
   if (!paths.length) return;
   const dest = await api.pickMoveDest();
   if (!dest) return;
   const res = await api.moveFiles(paths, dest);
   const ok = res.filter(r => r.ok).length;
-  state.selected.clear();
+  paths.forEach(p => state.selected.delete(p));
   await refreshLibrary();
   toast(`已移动 ${ok} 张到 ${baseName(dest)}`);
 }
@@ -1359,8 +1745,7 @@ function buildRenamePairs(items, pattern) {
     return { path: it.path, newName: name || raw };
   });
 }
-function renameModal() {
-  const paths = [...state.selected];
+function renameModal(paths = [...state.selected]) {
   if (!paths.length) return;
   const items = paths.map(p => byPath.get(p)).filter(Boolean);
 
@@ -1377,7 +1762,7 @@ function renameModal() {
       if (!name || name === cur) { ov.remove(); return; }
       const res = await api.renameFiles([{ path: it.path, newName: name }]);
       ov.remove();
-      state.selected.clear();
+      state.selected.delete(it.path);
       await refreshLibrary();
       toast(res[0] && res[0].ok ? '重命名成功' : '重命名失败');
     };
@@ -1406,15 +1791,14 @@ function renameModal() {
     ov.remove();
     const res = await api.renameFiles(pairs);
     const ok = res.filter(r => r.ok).length;
-    state.selected.clear();
+    paths.forEach(p => state.selected.delete(p));
     await refreshLibrary();
     toast(`重命名完成：${ok}/${pairs.length}`);
   };
 }
 
 /* 删除 / 清理 */
-async function trashSelected() {
-  const paths = [...state.selected];
+async function trashSelected(paths = [...state.selected]) {
   if (!paths.length) return;
   const ok = await confirmModal('移出图片',
     `将选中的 ${paths.length} 张图片从图库移除？\n文件不会被删除，可在左侧「回收站」中恢复。`,
@@ -1423,7 +1807,7 @@ async function trashSelected() {
   const res = await api.trashFiles(paths);
   const okN = res.filter(r => r.ok).length;
   const failN = res.length - okN;
-  state.selected.clear();
+  paths.forEach(p => state.selected.delete(p));
   state.dupStale = true;
   await refreshLibrary();
   if (failN === 0) {
@@ -1445,11 +1829,10 @@ async function clearRecords(paths) {
 }
 
 /* 从软件回收站恢复图片到主视图（不碰物理文件） */
-async function reviveSelected() {
-  const paths = [...state.selected];
+async function reviveSelected(paths = [...state.selected]) {
   if (!paths.length) return;
   await api.reviveFiles(paths);
-  state.selected.clear();
+  paths.forEach(p => state.selected.delete(p));
   await refreshLibrary();
   toast(`已恢复 ${paths.length} 张图片到图库`);
 }
@@ -1457,8 +1840,7 @@ async function reviveSelected() {
 /* 彻底删除：把物理文件送到 Windows 系统回收站（可从系统回收站还原），
  * 并清除 PicFlow 记录。与"清除记录"不同：那个只删记录不碰文件，
  * 这个真正删除文件。NSFW 图片同样走本地路径，绝不上传。 */
-async function purgeSelected() {
-  const paths = [...state.selected];
+async function purgeSelected(paths = [...state.selected]) {
   if (!paths.length) return;
   const ok = await confirmModal('彻底删除',
     `将选中的 ${paths.length} 张图片彻底删除？\n` +
@@ -1469,7 +1851,7 @@ async function purgeSelected() {
   const res = await api.purgeFiles(paths);
   const okN = res.filter(r => r.ok).length;
   const failN = res.length - okN;
-  state.selected.clear();
+  paths.forEach(p => state.selected.delete(p));
   state.dupStale = true;
   await refreshLibrary();
   if (failN === 0) {
@@ -1519,7 +1901,7 @@ function showGuide() {
     <div class="g-step"><span class="g-num">3</span><div><b>星标与 NSFW</b>
       <p>悬停缩略图点右上角 <b>★</b> 加星标；NSFW 图片可手动标记（缩略图右下角红角标）。顶部 <b>NSFW 已隐藏</b> 开关一键隐藏/显示所有 NSFW 图片；敏感图只在本地判定，不会被发到云端 API。</p></div></div>
     <div class="g-step"><span class="g-num">4</span><div><b>整理与看图</b>
-      <p>左上角圆圈选中（Ctrl 多选 / Shift 范围选），底部工具条批量打标签、星标、相册、移动、重命名、移出（进软件回收站可恢复）。单击图片打开灯箱：<b>滚轮缩放</b>、<b>双击进全屏</b>、全屏下<b>单击放大</b>看细节、<b>Esc</b> 退出。「重复 / 相似」视图可一键清理重复图片。</p></div></div>
+      <p>左上角圆圈选中（Ctrl 多选 / Shift 范围选），底部工具条批量打标签、星标、相册、移动、重命名、移出（进软件回收站可恢复）。<b>右键任意图片</b>可快速预览、复制图片/路径、标注分类、加入相册或删除；多选后右键对整批生效。单击图片打开灯箱：<b>滚轮缩放</b>、<b>双击进全屏</b>、全屏下<b>单击放大</b>看细节、<b>Esc</b> 退出。「重复 / 相似」视图可一键清理重复图片。</p></div></div>
     <div class="modal-foot"><button class="btn-primary" id="guide-ok">开始使用</button></div>`);
   ov.querySelector('#guide-ok').onclick = () => { ov.remove(); api.setFlag('guided', true); };
 }
@@ -1546,13 +1928,27 @@ document.addEventListener('keydown', e => {
     const lit = lbCurrent();
     if (lit) {
       const it = lit;
-      if (e.key === 's' || e.key === 'S') { e.preventDefault(); toggleStar(it.path).then(() => renderLbPanel(it)); }
-      if (e.key === 'n' || e.key === 'N') { e.preventDefault(); toggleNsfw(it.path).then(() => renderLbPanel(it)); }
-      if (e.key === 'c' || e.key === 'C') { e.preventDefault(); labelModal([it.path], () => { renderLbPanel(it); renderSidebar(); renderContent(); }); }
+      if (e.key === 's' || e.key === 'S') { e.preventDefault(); toggleStar(it.path); }
+      if (e.key === 'n' || e.key === 'N') { e.preventDefault(); toggleNsfw(it.path); }
+      if ((e.key === 'c' || e.key === 'C') && !e.ctrlKey && !e.metaKey) { e.preventDefault(); labelModal([it.path], () => { lbPanelRefresh(); renderSidebar(); renderContent(); }); }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+        e.preventDefault();
+        if (e.shiftKey) ctxCopyText([it.path]); else ctxCopyImage(it.path);
+      }
     }
     return;
   }
   if (typing) return;
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && state.selected.size) {
+    e.preventDefault();
+    if (e.shiftKey) ctxCopyText([...state.selected]);
+    else if (state.selected.size === 1) ctxCopyImage([...state.selected][0]);
+    else toast('一次只能复制一张图片，多选时请用「复制文件路径」');
+    return;
+  }
+  if (e.key === 'F2' && state.selected.size && state.view.type !== 'trash') {
+    e.preventDefault(); renameModal([...state.selected]); return;
+  }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
     e.preventDefault(); selectAll(); return;
   }
@@ -1576,7 +1972,7 @@ $('#btn-multi').onclick = () => {
   $('#grid').classList.toggle('multi', state.multi);
   $('#hint-bar').textContent = state.multi
     ? tr('点击图片 选中/取消 · Shift+点击 范围选择 · 选好后用底部操作条批量处理 · 点「完成选择」退出')
-    : tr('单击 预览 · 开启右上「多选」后点击图片直接选中 · Ctrl+A 全选 · Del 移出');
+    : tr('单击 预览 · 右键 更多操作 · 开启右上「多选」后点击图片直接选中 · Ctrl+A 全选 · Del 移出');
   if (!state.multi) { state.selected.clear(); syncSelectionUI(); }
 };
 $('#btn-nsfw').onclick = () => {
@@ -2023,11 +2419,10 @@ function labelModal(paths, after) {
   setTimeout(() => q.focus(), 40);
 }
 
-async function categoryModal() {
-  const paths = [...state.selected];
+async function categoryModal(paths = [...state.selected]) {
   if (!paths.length) return;
   labelModal(paths, async () => {
-    state.selected.clear();
+    paths.forEach(p => state.selected.delete(p));
     await refreshLibrary();
   });
 }

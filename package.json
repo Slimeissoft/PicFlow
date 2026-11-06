@@ -1,7 +1,7 @@
 {
   "name": "picflow",
   "productName": "PicFlow 图片管家",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "本地图片整理与管理桌面应用（云端 AI 识别 + 本地 NSFW 过滤）",
   "main": "main.js",
   "author": "PicFlow",
