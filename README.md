@@ -1,29 +1,29 @@
-# PicFlow 图片管家
+<p align="center">
+  <img src="docs/logo.png" width="108" height="108" alt="PicFlow 图片管家图标">
+</p>
 
-一款 Windows 桌面图片管理工具：本地管理、云端 AI 识别、隐私优先。
+<h1 align="center">PicFlow 图片管家</h1>
 
-> **v1.6.2 安全加固**（建议所有用户升级）：一次完整安全审计后的修复 ——
-> 禁止窗口被导航到外部页面（此前导航后远程页面会继承 `window.api`）、
-> 给 40+ 个 IPC 加上调用方校验与图库路径白名单（此前任意路径可读写/删除/执行）、
-> 修复重命名时的目录穿越、API Key 改为系统凭据加密存储且不再回传渲染层、
-> 渲染进程开启沙箱、收紧 CSP。
->
-> **v1.6.1**：新增**右键菜单** —— 右键任意图片即可预览、复制图片 / 路径、星标、标记 NSFW、
-> 标注分类、加入相册、重命名、移动、移出图库或彻底删除；多选后右键可整批处理。
-> 同时修好了「标记 NSFW 后按钮偶尔不变红」的状态同步问题（自动同步换新数据时的
-> 旧对象引用），以及搜索框里无法右键粘贴的问题。
->
-> **v1.6.0**：手动标注上线 —— 像数据标注一样，把 AI 分错的图片直接标到正确分类
-> （灯箱里点分类胶囊、按 `C`，或多选批量标注；标过的图重新跑识别不会被覆盖）。
-> 灯箱里标记 NSFW 后按钮变红底白字；修了星标/NSFW 按钮状态样式不生效、
-> 以及标记后当前图错位两个 bug。
->
-> **v1.5.0**：看图体验与设置大升级 —— 灯箱里单击/滚轮放大看细节、可拖动平移；
-> AI 分出的分类可以重命名或合并；侧栏相册可一键折叠；「AI 设置」升级为「设置」面板，
-> 支持简体中文 / 繁體中文 / English / 日本語 即时切换。
->
-> **v1.4.0 重大变化**：移除了本地 AI 识别模型，改为由你**自己的多模态大模型 API** 识别图片内容，
-> 识别质量更高、安装包更小，本地仅保留 NSFW 检测，确保敏感图片绝不上传。
+<p align="center">一款 Windows 桌面图片管理工具 · 本地管理 · 云端 AI 识别 · 隐私优先</p>
+
+<p align="center">
+  <a href="https://github.com/Slimeissoft/PicFlow/releases/latest"><img src="https://img.shields.io/badge/version-1.6.2-22C55E?style=flat-square" alt="version"></a>
+  <img src="https://img.shields.io/badge/platform-Windows%2010%20%2F%2011-0078D6?style=flat-square" alt="platform">
+  <img src="https://img.shields.io/badge/license-MIT-F97316?style=flat-square" alt="license">
+  <img src="https://img.shields.io/badge/AI-Cloud%20Vision-8B5CF6?style=flat-square" alt="ai">
+  <img src="https://img.shields.io/badge/NSFW-Local%20only-E11D48?style=flat-square" alt="nsfw">
+  <img src="https://img.shields.io/badge/i18n-4%20languages-0EA5E9?style=flat-square" alt="i18n">
+  <img src="https://img.shields.io/badge/update-GitHub%20Release-16A34A?style=flat-square" alt="update">
+</p>
+
+<p align="center">
+  <b>简体中文</b> · <a href="README.en.md">English</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.ja.md">日本語</a>
+</p>
+
+<p align="center">
+  <img src="docs/screenshot.jpg" width="920" alt="PicFlow 图库视图：左侧按日期 / AI 分类 / 相册 / 标签浏览，中间缩略图网格，顶部搜索与 NSFW 过滤">
+</p>
+<p align="center"><sub>图库视图：左侧按日期 / AI 分类 / 相册 / 标签浏览，顶部搜索与 NSFW 三态过滤，单击看大图</sub></p>
 
 ## 功能
 
@@ -43,13 +43,23 @@
 - **文件夹自动同步**：启动后与每 5 分钟静默重扫，外部新增/删除自动反映
 - **自动更新**：新版本发布到 GitHub Release 后，旧版本自动收到更新提示并一键下载安装
 
+## AI 分类
+
+<p align="center">
+  <img src="docs/ai-categories.jpg" width="920" alt="AI 分类总览：每个分类一张封面卡片，卡片下方显示分类名与图片数量">
+</p>
+<p align="center"><sub>AI 分类总览：每个分类自动配一张封面，卡片下方是分类名与数量，单击进入该分组</sub></p>
+
+识别结果不是一个笼统的「动漫」标签，而是具体到你认得出的条目——「崩坏：星穹铁道」「明日方舟：终末地」「代码截图」「浏览器截图」「绝区零」。
+总览页按图片数量排序，分类可以重命名、合并到已有分类，手动标注过的图片不会被 AI 覆盖。
+
 ## 安装
 
 1. 从 [Releases](https://github.com/Slimeissoft/PicFlow/releases/latest) 下载 `PicFlow-Setup-*.exe`
 2. 双击安装（可自选安装目录）
 3. 首次启动点「扫描文件夹」导入图片
 
-系统要求：Windows 10/11 x64。
+系统要求：Windows 10/11 x64。当前最新版 **1.6.2**（安全加固，建议所有用户升级）。
 
 ## 配置 AI 识别（必做）
 
@@ -69,7 +79,7 @@ AI 识别需要你自己的大模型 API（图片识别会产生少量费用，�
    | DeepSeek | `deepseek-chat` | 需使用支持视觉的模型 |
    | 自定义 | 任意 | 任何 OpenAI 兼容接口 |
 
-3. 填入 **API Key**（只保存在本机 `library.json`，不会上传到任何服务器）
+3. 填入 **API Key**（用系统凭据加密后只存在本机，不上传任何服务器）
 4. 点「测试连接」确认可用 → 保存
 5. 回到图库点顶部 **⚡ AI 识别**
 
@@ -106,7 +116,8 @@ AI 识别需要你自己的大模型 API（图片识别会产生少量费用，�
 - 图片文件始终在你本机，PicFlow 不上传图片到自己的服务器
 - AI 识别时，图片会发送到**你自己配置的 API**（这是识别的必要步骤）
 - **NSFW 图片绝不上传**：每张图先在本地用 nsfwjs 判定，命中 NSFW 的直接跳过
-- API Key 明文保存在本机 `%APPDATA%\PicFlow 图片管家\library.json`，请勿分享该文件
+- API Key 用系统凭据（Windows DPAPI / Electron `safeStorage`）加密后保存在本机 `library.json`，
+  渲染层只能拿到「是否已配置」与掩码，仍建议不要分享该文件
 
 ## 自动更新
 
@@ -124,7 +135,7 @@ AI 识别需要你自己的大模型 API（图片识别会产生少量费用，�
 |---|---|
 | 图库数据（分类/相册/标签/备注） | `%APPDATA%\PicFlow 图片管家\library.json` |
 | 缩略图缓存 | `%APPDATA%\PicFlow 图片管家\thumbs\` |
-| AI 配置（含 API Key） | 同上 `library.json` 的 `flags.cloudAI` |
+| AI 配置（API Key 加密保存） | 同上 `library.json` 的 `flags.cloudAI` |
 | 你的图片 | 原位置不动，PicFlow 不移动/不改名 |
 
 备份只需复制 `library.json`（缩略图可重新生成）。
@@ -158,7 +169,7 @@ npm run dist   # 打包 Windows 安装版（输出到 release/）
 
 ## 更新记录
 
-**v1.6.2**（2026-11-06）
+**v1.6.2**（2026-11-06）· 建议所有用户升级
 
 安全加固版本，功能无变化：
 
@@ -206,11 +217,20 @@ npm run dist   # 打包 Windows 安装版（输出到 release/）
 - 新增多语言：简体中文 / 繁體中文 / English / 日本語
 - 分类很多时分类条改为单行横向滚动，不再挤压图片区
 
-**v1.4.0**（2026-10-21）
+**v1.4.0**（2026-10-21）· 重大变化
 
-- 移除本地 AI 模型（WD14 / MobileNetV2），改为用户自有 API 的云端多模态识别
+- 移除本地 AI 识别模型（WD14 / MobileNetV2），改为用户自有 API 的云端多模态识别——识别质量更高、安装包更小，本地只保留 NSFW 检测，确保敏感图片绝不上传
 - 新增批量标注分类、灯箱全屏查看、electron-updater 自动更新
 
 ## License
 
-MIT
+本项目使用 MIT License，请勿将本软件用于非法用途。
+
+Feel free to enjoy open-source!
+
+Copyright (c) 2026 Slimeissoft
+
+## Contact with Me
+
+- **Email**：[lalouuie@gmail.com](mailto:lalouuie@gmail.com)
+- **GitHub**：[@Slimeissoft](https://github.com/Slimeissoft)
