@@ -146,13 +146,28 @@ app.whenReady().then(() => {
       return new Response('not found', { status: 404 });
     }
   });
+  // macOS：应用菜单（Cmd+Q / Cmd+W / 编辑菜单的复制粘贴都靠它）。
+  // 用 role 让系统按语言自动本地化；Windows 保持无菜单栏。
+  if (process.platform === 'darwin') {
+    Menu.setApplicationMenu(Menu.buildFromTemplate([
+      { role: 'appMenu' },
+      { role: 'editMenu' },
+      { role: 'windowMenu' }
+    ]));
+  }
   createWindow();
   setupAutoUpdater();
   // 文件夹自动同步：启动后 8 秒（避开首屏加载的磁盘/IO 竞争），之后每 5 分钟静默重扫
   setTimeout(autoSyncFolders, 8000);
   setInterval(autoSyncFolders, 5 * 60 * 1000);
 });
-app.on('window-all-closed', () => app.quit());
+// macOS：关掉窗口不退出进程（Dock 里点回来重新开窗），符合平台习惯
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) createWindow();
+});
 app.on('before-quit', () => DB.flushSync());
 
 /* ---------------- helpers ---------------- */
@@ -557,6 +572,27 @@ async function trashToRecycleBin(filePath) {
       logTrash('move-to-temp FAILED: ' + e1c.message);
     }
   }
+
+  // === macOS：到此为止都是 shell.trashItem 的变体，再往下全是 Windows 专用兜底 ===
+  // PowerShell / cmd.exe 在 mac 上必然失败，最后会落到 unlink 永久删除 —— 必须在这里拦住。
+  // 先用 Finder 的废纸篓（~/.Trash）作为第二条通道，失败就如实报错，绝不静默永久删除。
+  if (process.platform === 'darwin') {
+    try {
+      const trashDir = path.join(app.getPath('home'), '.Trash');
+      const ext = path.extname(filePath);
+      let dest = path.join(trashDir, path.basename(filePath));
+      if (fs.existsSync(dest)) {
+        dest = path.join(trashDir, `${path.basename(filePath, ext)}-${Date.now()}${ext}`);
+      }
+      fs.renameSync(filePath, dest);
+      logTrash('macOS: moved to ~/.Trash → ' + dest);
+      return { ok: true, method: 'macos.trash' };
+    } catch (eMac) {
+      logTrash('macOS ~/.Trash FAILED: ' + eMac.message);
+      throw new Error(`移入废纸篓失败：${err1} / ${eMac.message}`);
+    }
+  }
+
   // 方式2：PowerShell VisualBasic FileIO（用完整枚举类型名 + 绝对路径调用）
   try {
     const psExe = findPowerShell();
@@ -996,6 +1032,9 @@ const { autoUpdater } = require('electron-updater');
 
 function setupAutoUpdater() {
   if (!app.isPackaged) return;
+  // macOS 版目前是 ad-hoc 签名（没有 Apple 开发者证书），Squirrel.Mac 会校验签名，
+  // 自动更新必然失败。这里直接不启用，mac 用户从 Releases 手动下载新版。
+  if (process.platform === 'darwin') return;
   autoUpdater.autoDownload = false;          // 先提示，用户点下载才下（避免偷跑流量）
   autoUpdater.autoInstallOnAppQuit = true;   // 下载完成后退出时自动装
   autoUpdater.allowPrerelease = false;
@@ -1035,6 +1074,9 @@ function setupAutoUpdater() {
 
 handle('update-check', async () => {
   if (!app.isPackaged) return { ok: false, error: '开发模式下不检查更新' };
+  if (process.platform === 'darwin') {
+    return { ok: false, error: 'macOS 版暂不支持应用内更新，请到 GitHub Releases 下载新版', external: true };
+  }
   try {
     const r = await autoUpdater.checkForUpdates();
     return { ok: true, version: r && r.updateInfo && r.updateInfo.version };
@@ -1043,10 +1085,12 @@ handle('update-check', async () => {
   }
 });
 handle('update-download', async () => {
+  if (process.platform === 'darwin') return { ok: false, error: 'macOS 版请手动下载', external: true };
   try { await autoUpdater.downloadUpdate(); return { ok: true }; }
   catch (e) { return { ok: false, error: String(e.message || e) }; }
 });
 handle('update-install', async () => {
+  if (process.platform === 'darwin') return { ok: false, error: 'macOS 版请手动安装', external: true };
   setImmediate(() => { try { autoUpdater.quitAndInstall(); } catch (e) { console.error('install err', e); } });
   return { ok: true };
 });

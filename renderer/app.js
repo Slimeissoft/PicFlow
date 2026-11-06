@@ -43,11 +43,17 @@ function liveVisible(i) {
  */
 const LANGS = (window.PF_I18N && window.PF_I18N.langs) || [{ id: 'zh-CN', label: '简体中文' }];
 const I18N_DICT = (window.PF_I18N && window.PF_I18N.dict) || {};
+/* macOS 上把 Ctrl 系快捷键写成 ⌘ 系（Ctrl+C → ⌘C，Ctrl+Shift+C → ⌘⇧C，Del → ⌫） */
+const IS_MAC = /Macintosh|Mac OS X/i.test(navigator.userAgent);
+const macKeys = s => {
+  if (!IS_MAC || typeof s !== 'string') return s;
+  return s.replace(/Ctrl\+/g, '⌘').replace(/Shift\+/g, '⇧').replace(/\bDel\b/g, '⌫').replace(/\bCtrl\b/g, '⌘');
+};
 let LANG = 'zh-CN';
 function tr(zh) {
-  if (LANG === 'zh-CN') return zh;
+  if (LANG === 'zh-CN') return macKeys(zh);
   const d = I18N_DICT[LANG];
-  return (d && d[zh]) || zh;
+  return macKeys((d && d[zh]) || zh);
 }
 /* 数量：3 photos / 3枚 / 3 张 */
 function pc(n) {
@@ -1001,8 +1007,8 @@ function ctxImageItems(paths, opts = {}) {
     } },
     { label: tr('在文件夹中显示'), icon: 'folder', disabled: !one, action: () => api.openInFolder(paths[0]) },
     { sep: true },
-    { label: tr('复制图片'), icon: 'image', hint: 'Ctrl+C', disabled: !one, action: () => ctxCopyImage(paths[0]) },
-    { label: tr('复制文件路径'), icon: 'link', hint: 'Ctrl+Shift+C', action: () => ctxCopyText(paths) },
+    { label: tr('复制图片'), icon: 'image', hint: IS_MAC ? '⌘C' : 'Ctrl+C', disabled: !one, action: () => ctxCopyImage(paths[0]) },
+    { label: tr('复制文件路径'), icon: 'link', hint: IS_MAC ? '⌘⇧C' : 'Ctrl+Shift+C', action: () => ctxCopyText(paths) },
     { sep: true },
     { label: one && one.starred ? tr('取消星标') : tr('加星标'), icon: 'star', hint: lb ? 'S' : '', action: () => ctxSetFlag(paths, 'starred') },
     { label: one && one.nsfw ? tr('取消 NSFW 标记') : tr('标记为 NSFW'), icon: 'nsfw', hint: lb ? 'N' : '', action: () => ctxSetFlag(paths, 'nsfw') },
@@ -1952,7 +1958,8 @@ document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
     e.preventDefault(); selectAll(); return;
   }
-  if (e.key === 'Delete' && state.selected.size && state.view.type !== 'trash') { trashSelected(); return; }
+  // macOS 笔记本键盘没有独立的 Delete 键，Backspace 才是「删除」
+  if ((e.key === 'Delete' || (IS_MAC && e.key === 'Backspace')) && state.selected.size && state.view.type !== 'trash') { trashSelected(); return; }
   if (e.key === ' ' && state.lastIdx >= 0 && state.items[state.lastIdx]) {
     e.preventDefault(); openLightbox(state.lastIdx);
   }

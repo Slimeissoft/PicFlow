@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/Slimeissoft/PicFlow/releases/latest"><img src="https://img.shields.io/badge/version-1.6.2-22C55E?style=flat-square" alt="version"></a>
-  <img src="https://img.shields.io/badge/platform-Windows%2010%20%2F%2011-0078D6?style=flat-square" alt="platform">
+  <img src="https://img.shields.io/badge/platform-Windows%20%2F%20macOS-0078D6?style=flat-square" alt="platform">
   <img src="https://img.shields.io/badge/license-MIT-F97316?style=flat-square" alt="license">
   <img src="https://img.shields.io/badge/AI-Cloud%20Vision-8B5CF6?style=flat-square" alt="ai">
   <br>
@@ -56,11 +56,26 @@
 
 ## 安裝
 
-1. 從 [Releases](https://github.com/Slimeissoft/PicFlow/releases/latest) 下載 `PicFlow-Setup-*.exe`
+目前最新版 **1.6.3**。Windows 與 macOS 都從 [Releases](https://github.com/Slimeissoft/PicFlow/releases/latest) 下載。
+
+**Windows（10 / 11 x64）**
+
+1. 下載 `PicFlow-Setup-1.6.3.exe`
 2. 雙擊安裝（可自選安裝目錄）
 3. 首次啟動點「掃描資料夾」匯入圖片
 
-系統需求：Windows 10/11 x64。目前最新版 **1.6.2**（安全加固，建議所有使用者升級）。
+**macOS（11 Big Sur 以上，Apple Silicon / Intel）**
+
+1. 下載 `PicFlow-1.6.3-arm64.dmg`（M 系列晶片）或 `PicFlow-1.6.3-x64.dmg`（Intel）
+2. 開啟 dmg，把「PicFlow 图片管家」拖進「應用程式」
+3. **首次開啟請右鍵 App →「打開」**：這個版本沒有 Apple 開發者憑證，只做了 ad-hoc 簽章，系統會攔一次
+4. 若提示「已損毀，無法打開」，在終端機執行：
+
+   ```bash
+   xattr -cr "/Applications/PicFlow 图片管家.app"
+   ```
+
+macOS 版暫不支援應用程式內自動更新，新版本請回到 Releases 下載。
 
 ## 設定 AI 辨識（必做）
 
@@ -90,6 +105,8 @@ AI 辨識需要你自己的大模型 API（圖片辨識會產生少量費用，�
 依各家視覺模型價格計費，通常每張幾分錢到幾毛錢。
 
 ## 使用說明
+
+macOS 上把下表的 `Ctrl` 讀作 `⌘`、`Del` 讀作 `⌫`（介面也會自動顯示成 ⌘）。
 
 | 操作 | 方式 |
 |---|---|
@@ -121,7 +138,7 @@ AI 辨識需要你自己的大模型 API（圖片辨識會產生少量費用，�
   渲染層只能拿到「是否已設定」與遮罩，仍建議不要分享該檔案
 - 發現安全性問題請依 [SECURITY.md](SECURITY.md) 私下回報，不要開公開 issue
 
-## 自動更新
+## 自動更新（僅 Windows）
 
 軟體啟動後會自動檢查 GitHub Releases（8 秒後靜默檢查一次）。
 發現新版本時，底部會跳出提示列：
@@ -130,6 +147,8 @@ AI 辨識需要你自己的大模型 API（圖片辨識會產生少量費用，�
 - 更新只下載變更部分（electron-updater 差異更新），比重新下載安裝包快
 
 > 注意：v1.4.0 之前的版本沒有自動更新功能，需要手動安裝一次 v1.4.0，之後即可自動升級。
+>
+> macOS 版是 ad-hoc 簽章（無開發者憑證），Squirrel.Mac 無法驗證更新包，因此不啟用應用程式內更新。
 
 ## 資料位置
 
@@ -165,11 +184,20 @@ npm run dist   # 打包 Windows 安裝版（輸出到 release/）
 
 ## 已知限制
 
-- 僅支援 Windows（NSIS 安裝包）
+- Windows 用 NSIS 安裝包，macOS 用 dmg / zip
+- macOS 版未簽章、未公證（ad-hoc 簽章），首次開啟需右鍵 →「打開」；也沒有應用程式內自動更新
 - AI 辨識速度取決於你選的模型服務商（通常每張 1-5 秒）
 - 本機離線辨識已移除；無網路時 AI 分類不可用（圖庫管理功能不受影響）
 
 ## 更新記錄
+
+**v1.6.3**（2026-11-06）
+
+- 新增 **macOS 版**：Apple Silicon（`arm64`）與 Intel（`x64`）各提供 dmg 與 zip
+- macOS 適配：`⌘` 快捷鍵提示、`⌫` 刪除、系統應用程式選單（`⌘Q` / `⌘W`）、關窗不結束程式、刪除走資源回收筒
+- macOS 版為 ad-hoc 簽章（無 Apple 開發者憑證），首次開啟需右鍵 →「打開」；暫不支援應用程式內自動更新
+- 文件：重寫 [SECURITY.md](SECURITY.md)；README 增加 English / 日本語 版本
+- Windows 行為無變化，僅同步版本號
 
 **v1.6.2**（2026-11-06）· 建議所有使用者升級
 

@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/Slimeissoft/PicFlow/releases/latest"><img src="https://img.shields.io/badge/version-1.6.2-22C55E?style=flat-square" alt="version"></a>
-  <img src="https://img.shields.io/badge/platform-Windows%2010%20%2F%2011-0078D6?style=flat-square" alt="platform">
+  <img src="https://img.shields.io/badge/platform-Windows%20%2F%20macOS-0078D6?style=flat-square" alt="platform">
   <img src="https://img.shields.io/badge/license-MIT-F97316?style=flat-square" alt="license">
   <img src="https://img.shields.io/badge/AI-Cloud%20Vision-8B5CF6?style=flat-square" alt="ai">
   <br>
@@ -55,11 +55,27 @@ The overview is sorted by image count. Categories can be renamed or merged, and 
 
 ## Install
 
-1. Download `PicFlow-Setup-*.exe` from [Releases](https://github.com/Slimeissoft/PicFlow/releases/latest)
+Latest release: **1.6.3**. Both platforms download from [Releases](https://github.com/Slimeissoft/PicFlow/releases/latest).
+
+**Windows (10 / 11 x64)**
+
+1. Download `PicFlow-Setup-1.6.3.exe`
 2. Run the installer (you can pick the install directory)
 3. On first launch, click **Scan folder** to import your images
 
-Requires Windows 10/11 x64. Latest release: **1.6.2** (security hardening — upgrading is recommended).
+**macOS (11 Big Sur or later, Apple Silicon / Intel)**
+
+1. Download `PicFlow-1.6.3-arm64.dmg` (M-series) or `PicFlow-1.6.3-x64.dmg` (Intel)
+2. Open the dmg and drag "PicFlow 图片管家" into Applications
+3. **First launch: right-click the app → Open.** This build has no Apple Developer certificate
+   (ad-hoc signed only), so Gatekeeper blocks it once
+4. If macOS says the app "is damaged and can't be opened", run:
+
+   ```bash
+   xattr -cr "/Applications/PicFlow 图片管家.app"
+   ```
+
+The macOS build has no in-app auto-update yet — grab new versions from Releases.
 
 ## Configure AI tagging (required)
 
@@ -88,6 +104,8 @@ AI tagging uses your own multimodal API. Image recognition costs a little money,
 **Cost**: one image input per photo (JPEG downscaled to 1024 px). At typical vision-model prices that is a fraction of a cent to a few cents per image.
 
 ## Usage
+
+On macOS read `Ctrl` as `⌘` and `Del` as `⌫` (the UI already renders them that way).
 
 | Action | How |
 |---|---|
@@ -118,7 +136,7 @@ AI tagging uses your own multimodal API. Image recognition costs a little money,
 - The API key is encrypted with the OS credential store (Windows DPAPI / Electron `safeStorage`) inside `library.json`; the renderer only ever sees "configured or not" plus a mask. Please still keep that file private
 - Found a security issue? Report it privately as described in [SECURITY.md](SECURITY.md) — please do not open a public issue
 
-## Auto update
+## Auto update (Windows only)
 
 The app checks GitHub Releases in the background (a silent check 8 seconds after launch).
 When a new version appears, a bar shows up at the bottom:
@@ -127,6 +145,8 @@ When a new version appears, a bar shows up at the bottom:
 - Only the changed blocks are downloaded (electron-updater differential update), which is faster than a full installer
 
 > Versions before v1.4.0 have no auto-updater — install v1.4.0 manually once, and later versions update themselves.
+>
+> The macOS build is ad-hoc signed (no Developer ID), which Squirrel.Mac cannot verify, so in-app updates are disabled there.
 
 ## Data locations
 
@@ -162,11 +182,22 @@ Key files:
 
 ## Known limitations
 
-- Windows only (NSIS installer)
+- Windows ships an NSIS installer; macOS ships dmg / zip
+- The macOS build is unnotarized (ad-hoc signed): right-click → Open on first launch, and no in-app updates
 - Tagging speed depends on your provider (usually 1–5 s per image)
 - Offline local recognition was removed; AI tagging needs a network connection (everything else works offline)
 
 ## Changelog
+
+**v1.6.3** (2026-11-06)
+
+- **macOS support**: Apple Silicon (`arm64`) and Intel (`x64`), each as dmg and zip
+- macOS adaptations: `⌘` shortcut hints, `⌫` to remove, standard app menu (`⌘Q` / `⌘W`),
+  closing the window keeps the app alive, deletes go to the Trash
+- The macOS build is ad-hoc signed (no Apple Developer certificate): right-click → Open on first
+  launch, and in-app auto-update is disabled
+- Docs: rewrote [SECURITY.md](SECURITY.md); added 繁體中文 and 日本語 READMEs
+- No behaviour changes on Windows
 
 **v1.6.2** (2026-11-06) · recommended for everyone
 

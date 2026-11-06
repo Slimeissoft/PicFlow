@@ -1,0 +1,108 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Windows (x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build NSIS installer
+        run: npx electron-builder --win --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win
+          if-no-files-found: error
+          path: |
+            release/*.exe
+            release/*.exe.blockmap
+            release/latest.yml
+
+  macos:
+    name: macOS (arm64 + x64)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build dmg + zip (ad-hoc signed)
+        run: npx electron-builder --mac --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          if-no-files-found: error
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/latest-mac.yml
+
+  release:
+    name: Publish release
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: ver
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List assets
+        run: ls -lh dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: PicFlow 图片管家 v${{ steps.ver.outputs.version }}
+          draft: false
+          prerelease: false
+          files: dist/**/*
+          body: |
+            ## PicFlow 图片管家 v${{ steps.ver.outputs.version }}
+
+            首个 macOS 版本（Apple Silicon / Intel 双架构），Windows 版同步更新。
+
+            ### macOS
+            - 新增 macOS 支持：`arm64`（M 系列）与 `x64`（Intel）各提供 `dmg` 与 `zip`
+            - 平台适配：⌘ 快捷键、⌫ 删除、系统应用菜单、废纸篓
+            - **当前为 ad-hoc 签名、未公证**：首次打开请右键 App →「打开」，
+              或执行 `xattr -cr "/Applications/PicFlow 图片管家.app"`
+            - macOS 版暂不支持应用内自动更新，请从本页下载新版
+
+            ### Windows
+            - 行为与此前版本一致，同步版本号（安装包仍是 NSIS，支持应用内自动更新）
+
+            ### 文档
+            - 重写 `SECURITY.md`：支持版本、漏洞报告流程、范围与安全设计
+            - README 新增 English / 繁體中文 / 日本語 版本

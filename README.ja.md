@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/Slimeissoft/PicFlow/releases/latest"><img src="https://img.shields.io/badge/version-1.6.2-22C55E?style=flat-square" alt="version"></a>
-  <img src="https://img.shields.io/badge/platform-Windows%2010%20%2F%2011-0078D6?style=flat-square" alt="platform">
+  <img src="https://img.shields.io/badge/platform-Windows%20%2F%20macOS-0078D6?style=flat-square" alt="platform">
   <img src="https://img.shields.io/badge/license-MIT-F97316?style=flat-square" alt="license">
   <img src="https://img.shields.io/badge/AI-Cloud%20Vision-8B5CF6?style=flat-square" alt="ai">
   <br>
@@ -55,11 +55,27 @@
 
 ## インストール
 
-1. [Releases](https://github.com/Slimeissoft/PicFlow/releases/latest) から `PicFlow-Setup-*.exe` をダウンロード
+最新版は **1.6.3**。Windows も macOS も [Releases](https://github.com/Slimeissoft/PicFlow/releases/latest) からダウンロードします。
+
+**Windows（10 / 11 x64）**
+
+1. `PicFlow-Setup-1.6.3.exe` をダウンロード
 2. インストーラーを実行（インストール先は選択可）
 3. 初回起動時に「フォルダーを走査」で画像を取り込み
 
-必要条件：Windows 10/11 x64。最新版は **1.6.2**（セキュリティ強化、アップデート推奨）。
+**macOS（11 Big Sur 以降、Apple Silicon / Intel）**
+
+1. `PicFlow-1.6.3-arm64.dmg`（M シリーズ）または `PicFlow-1.6.3-x64.dmg`（Intel）をダウンロード
+2. dmg を開き、「PicFlow 图片管家」をアプリケーションフォルダーへドラッグ
+3. **初回起動はアプリを右クリック →「開く」**：Apple の開発者証明書がないため ad-hoc 署名のみで、
+   システムに一度ブロックされます
+4. 「壊れているため開けません」と出た場合はターミナルで：
+
+   ```bash
+   xattr -cr "/Applications/PicFlow 图片管家.app"
+   ```
+
+macOS 版はアプリ内自動アップデートに未対応です。新しい版は Releases から取得してください。
 
 ## AI 認識の設定（必須）
 
@@ -88,6 +104,8 @@ AI 認識には自分のマルチモーダル API が必要です（画像認識
 **費用の目安**：1 枚あたり画像入力 1 回（1024px に縮小した JPEG）。各社の画像モデルの料金で、1 枚あたり数円未満が目安です。
 
 ## 使い方
+
+macOS では下記の `Ctrl` を `⌘`、`Del` を `⌫` と読み替えてください（UI も自動で ⌘ 表示になります）。
 
 | 操作 | 方法 |
 |---|---|
@@ -118,7 +136,7 @@ AI 認識には自分のマルチモーダル API が必要です（画像認識
 - API キーは OS の資格情報ストア（Windows DPAPI / Electron `safeStorage`）で暗号化して `library.json` に保存されます。レンダラー側には「設定済みかどうか」とマスクしか渡りませんが、ファイル自体は共有しないでください
 - セキュリティ上の問題は [SECURITY.md](SECURITY.md) の手順で非公開で報告してください（公開 issue は立てないでください）
 
-## 自動アップデート
+## 自動アップデート（Windows のみ）
 
 起動後、GitHub Releases を自動で確認します（起動 8 秒後に静かに 1 回）。
 新しいバージョンがあると下部にバーが表示されます：
@@ -127,6 +145,8 @@ AI 認識には自分のマルチモーダル API が必要です（画像認識
 - 差分のみをダウンロードするため（electron-updater）、インストーラーを丸ごと落とすより速く完了します
 
 > 注意：v1.4.0 より前のバージョンには自動更新がありません。一度 v1.4.0 を手動でインストールすれば、以降は自動で更新されます。
+>
+> macOS 版は ad-hoc 署名（開発者証明書なし）のため Squirrel.Mac が更新パッケージを検証できず、アプリ内更新は無効にしています。
 
 ## データの保存場所
 
@@ -162,11 +182,22 @@ npm run dist   # Windows インストーラーをビルド（release/ に出力�
 
 ## 既知の制限
 
-- Windows のみ（NSIS インストーラー）
+- Windows は NSIS インストーラー、macOS は dmg / zip
+- macOS 版は未公証（ad-hoc 署名）のため初回は右クリック →「開く」、アプリ内更新もなし
 - 認識速度は利用するプロバイダー次第（通常 1 枚 1〜5 秒）
 - ローカルでのオフライン認識は廃止しました。ネットワークがないと AI 分類は使えません（それ以外の機能は動作します）
 
 ## 更新履歴
+
+**v1.6.3**（2026-11-06）
+
+- **macOS 版を追加**：Apple Silicon（`arm64`）と Intel（`x64`）それぞれ dmg と zip
+- macOS 対応：`⌘` ショートカット表示、`⌫` で削除、標準アプリメニュー（`⌘Q` / `⌘W`）、
+  ウィンドウを閉じてもアプリは終了しない、削除はゴミ箱へ
+- macOS 版は ad-hoc 署名（Apple 開発者証明書なし）のため初回は右クリック →「開く」、
+  アプリ内自動アップデートは無効
+- ドキュメント：[SECURITY.md](SECURITY.md) を書き直し、README に English / 繁體中文 を追加
+- Windows の挙動に変更なし（バージョン番号のみ同期）
 
 **v1.6.2**（2026-11-06）· すべての方にアップデート推奨
 

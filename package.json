@@ -1,13 +1,14 @@
 {
   "name": "picflow",
   "productName": "PicFlow 图片管家",
-  "version": "1.6.2",
+  "version": "1.6.3",
   "description": "本地图片整理与管理桌面应用（云端 AI 识别 + 本地 NSFW 过滤）",
   "main": "main.js",
   "author": "PicFlow",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win"
+    "dist": "electron-builder --win",
+    "dist:mac": "electron-builder --mac"
   },
   "dependencies": {
     "@tensorflow/tfjs": "^4.22.0",
@@ -32,6 +33,7 @@
       "output": "release",
       "buildResources": "build"
     },
+    "afterPack": "build/afterPack.js",
     "files": [
       "main.js",
       "scanner.js",
@@ -61,6 +63,34 @@
       "createStartMenuShortcut": true,
       "shortcutName": "PicFlow 图片管家",
       "uninstallDisplayName": "PicFlow 图片管家"
+    },
+    "mac": {
+      "category": "public.app-category.photography",
+      "icon": "build/icon.icns",
+      "artifactName": "PicFlow-${version}-${arch}.${ext}",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "identity": null,
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ]
+    },
+    "dmg": {
+      "title": "PicFlow ${version}",
+      "artifactName": "PicFlow-${version}-${arch}.${ext}"
     }
   }
 }
