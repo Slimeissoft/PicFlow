@@ -46,6 +46,7 @@
     ],
     "win": {
       "icon": "build/icon.ico",
+      "artifactName": "PicFlow-Setup-${version}.${ext}",
       "target": [
         {
           "target": "nsis",
