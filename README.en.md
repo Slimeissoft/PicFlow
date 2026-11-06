@@ -116,6 +116,7 @@ AI tagging uses your own multimodal API. Image recognition costs a little money,
 - AI tagging sends the image to **the API you configured** — that is inherent to recognition
 - **NSFW images are never uploaded**: each image is checked locally with nsfwjs first and skipped when flagged
 - The API key is encrypted with the OS credential store (Windows DPAPI / Electron `safeStorage`) inside `library.json`; the renderer only ever sees "configured or not" plus a mask. Please still keep that file private
+- Found a security issue? Report it privately as described in [SECURITY.md](SECURITY.md) — please do not open a public issue
 
 ## Auto update
 

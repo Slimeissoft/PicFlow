@@ -119,6 +119,7 @@ AI 识别需要你自己的大模型 API（图片识别会产生少量费用，�
 - **NSFW 图片绝不上传**：每张图先在本地用 nsfwjs 判定，命中 NSFW 的直接跳过
 - API Key 用系统凭据（Windows DPAPI / Electron `safeStorage`）加密后保存在本机 `library.json`，
   渲染层只能拿到「是否已配置」与掩码，仍建议不要分享该文件
+- 发现安全问题请按 [SECURITY.md](SECURITY.md) 私下报告，不要开公开 issue
 
 ## 自动更新
 
