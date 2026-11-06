@@ -4,10 +4,10 @@
 
 <h1 align="center">PicFlow</h1>
 
-<p align="center">A Windows desktop photo library · local-first · cloud AI tagging · privacy-first</p>
+<p align="center">A Windows and macOS desktop photo library · local-first · cloud AI tagging · privacy-first</p>
 
 <p align="center">
-  <a href="https://github.com/Slimeissoft/PicFlow/releases/latest"><img src="https://img.shields.io/badge/version-1.6.2-22C55E?style=flat-square" alt="version"></a>
+  <a href="https://github.com/Slimeissoft/PicFlow/releases/latest"><img src="https://img.shields.io/badge/version-1.6.3-22C55E?style=flat-square" alt="version"></a>
   <img src="https://img.shields.io/badge/platform-Windows%20%2F%20macOS-0078D6?style=flat-square" alt="platform">
   <img src="https://img.shields.io/badge/license-MIT-F97316?style=flat-square" alt="license">
   <img src="https://img.shields.io/badge/AI-Cloud%20Vision-8B5CF6?style=flat-square" alt="ai">

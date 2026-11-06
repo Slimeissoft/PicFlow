@@ -4,10 +4,10 @@
 
 <h1 align="center">PicFlow 画像マネージャー</h1>
 
-<p align="center">Windows 用デスクトップ画像管理ツール · ローカル管理 · クラウド AI 認識 · プライバシー優先</p>
+<p align="center">Windows / macOS デスクトップ画像管理ツール · ローカル管理 · クラウド AI 認識 · プライバシー優先</p>
 
 <p align="center">
-  <a href="https://github.com/Slimeissoft/PicFlow/releases/latest"><img src="https://img.shields.io/badge/version-1.6.2-22C55E?style=flat-square" alt="version"></a>
+  <a href="https://github.com/Slimeissoft/PicFlow/releases/latest"><img src="https://img.shields.io/badge/version-1.6.3-22C55E?style=flat-square" alt="version"></a>
   <img src="https://img.shields.io/badge/platform-Windows%20%2F%20macOS-0078D6?style=flat-square" alt="platform">
   <img src="https://img.shields.io/badge/license-MIT-F97316?style=flat-square" alt="license">
   <img src="https://img.shields.io/badge/AI-Cloud%20Vision-8B5CF6?style=flat-square" alt="ai">
