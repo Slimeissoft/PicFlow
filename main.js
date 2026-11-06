@@ -1,7 +1,7 @@
 'use strict';
 // 必须在最早期设置：主进程 I/O 线程池太小会让批量缩略图读盘排队（默认 4）
 process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || '16';
-const { app, BrowserWindow, ipcMain, dialog, shell, nativeImage, protocol, clipboard, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, nativeImage, protocol, clipboard, Menu, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const fsp = require('fs/promises');
@@ -12,11 +12,74 @@ const DB = require('./db');
 const AI = require('./ai');
 const CloudAI = require('./cloudai');
 
+/* ============================================================
+ * 安全边界（2026-11-06 审计后加固）
+ *
+ * 1) 只信任本地页面发来的 IPC：preload 在每次导航时都会重新注入，
+ *    若窗口被导航到远程页面，那个页面也会拿到 window.api。
+ *    所以所有 handler 一律校验 senderFrame.url 必须是 file://。
+ * 2) 文件类操作只接受图库内的路径：防止渲染层被攻陷后被拿来
+ *    读写/删除/执行任意文件。
+ * ============================================================ */
+function assertLocalSender(e) {
+  const url = (e && e.senderFrame && e.senderFrame.url) || '';
+  if (!url.startsWith('file://')) throw new Error('unauthorized: non-local sender');
+}
+
+/* 所有 IPC 统一走这里，天然带上发送方校验 */
+function handle(channel, fn) {
+  ipcMain.handle(channel, (e, ...args) => {
+    assertLocalSender(e);
+    return fn(e, ...args);
+  });
+}
+
+/* 路径必须属于图库：数据库里有记录，或位于已扫描的文件夹内 */
+function assertLibraryPath(p) {
+  const s = String(p || '');
+  if (!s) throw new Error('bad path');
+  if (DB.getImage(s)) return s;
+  const norm = path.resolve(s).toLowerCase();
+  const roots = DB.getFolders().map(f => path.resolve(f).toLowerCase());
+  if (roots.some(r => norm === r || norm.startsWith(r + path.sep))) return s;
+  throw new Error('path not in library: ' + s);
+}
+
+/* 过滤文件名里的非法/穿越字符，只允许「纯名字」 */
+function safeBaseName(name) {
+  return String(name == null ? '' : name)
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
+    .replace(/^\.+/, '')
+    .trim();
+}
+
+/* ---------- API Key：用系统凭据加密后再落盘 ---------- */
+function decryptApiKey(cfg) {
+  if (!cfg) return '';
+  if (cfg.apiKeyEnc) {
+    try { return safeStorage.decryptString(Buffer.from(cfg.apiKeyEnc, 'base64')); } catch { return ''; }
+  }
+  return cfg.apiKey || '';   // 兼容 1.6.1 及更早的明文数据
+}
+function encryptApiKey(key) {
+  const s = String(key || '');
+  if (!s) return {};
+  if (safeStorage.isEncryptionAvailable()) {
+    return { apiKeyEnc: safeStorage.encryptString(s).toString('base64') };
+  }
+  return { apiKey: s };   // 系统不支持加密时的兜底
+}
+/* 主进程内部用：拿到带明文 key 的可用配置 */
+function cloudConfigResolved() {
+  const cfg = DB.getFlags().cloudAI || {};
+  return { ...cfg, apiKey: decryptApiKey(cfg) };
+}
+
 // 自定义协议：缩略图直接由 Chromium 加载（不经 IPC + base64，启动/浏览快数倍）
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'picflow-thumb',
-    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, bypassCSP: true }
+    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true }
   }
 ]);
 
@@ -46,9 +109,23 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: true
     }
   });
+  // 安全：只允许停留在本地页面，禁止被导航到远程站点
+  // （preload 每次导航都会重新注入，导航出去等于把 window.api 交给对方）
+  win.webContents.on('will-navigate', (e, url) => {
+    if (!url.startsWith('file://')) {
+      e.preventDefault();
+      console.warn('[security] blocked navigation:', url);
+    }
+  });
+  // 安全：禁止 window.open 在应用内开新窗口
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    console.warn('[security] blocked window.open:', url);
+    return { action: 'deny' };
+  });
+  win.webContents.on('will-attach-webview', e => e.preventDefault());
   win.once('ready-to-show', () => win.show());
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 }
@@ -150,12 +227,12 @@ async function processFile(f) {
 
 /* ---------------- IPC ---------------- */
 
-ipcMain.handle('pick-folder', async () => {
+handle('pick-folder', async () => {
   const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'] });
   return r.canceled ? null : r.filePaths[0];
 });
 
-ipcMain.handle('pick-move-dest', async () => {
+handle('pick-move-dest', async () => {
   const r = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] });
   return r.canceled ? null : r.filePaths[0];
 });
@@ -201,7 +278,7 @@ async function scanFolderCore(folder, opts = {}) {
   } finally { scanning = false; }
 }
 
-ipcMain.handle('scan-folder', async (e, folder) => scanFolderCore(folder));
+handle('scan-folder', async (e, folder) => scanFolderCore(folder));
 
 /* 自动同步：静默重扫所有已登记文件夹，内容有变化才通知前端刷新，不打扰浏览 */
 async function autoSyncFolders() {
@@ -220,7 +297,7 @@ async function autoSyncFolders() {
   if (added > 0 || changed > 0) send('sync:done', { added, missing: changed });
 }
 
-ipcMain.handle('get-library', async () => {
+handle('get-library', async () => {
   // 给每条记录附上缩略图 URL（hash 算法与 thumbPathFor 一致：md5(path|mtime|size)）
   // 渲染端 <img src=thumbUrl> 直接由自定义协议加载，避免 300+ 次 IPC + base64
   const images = DB.getImages().map(i => {
@@ -237,11 +314,20 @@ ipcMain.handle('get-library', async () => {
     images,
     albums: DB.getAlbums(),
     folders: DB.getFolders(),
-    flags: DB.getFlags()
+    // flags 里含 AI 配置：必须剥掉密钥，只保留「有没有配」的状态
+    flags: (() => {
+      const f = { ...DB.getFlags() };
+      if (f.cloudAI) {
+        const key = decryptApiKey(f.cloudAI);
+        const { apiKey, apiKeyEnc, ...rest } = f.cloudAI;
+        f.cloudAI = { ...rest, hasKey: !!key, keyMask: key ? key.slice(0, 3) + '…' + key.slice(-4) : '' };
+      }
+      return f;
+    })()
   };
 });
 
-ipcMain.handle('get-thumb', async (e, f) => {
+handle('get-thumb', async (e, f) => {
   try {
     const st = await fsp.stat(f);
     let tp = await thumbPathFor(f, st);
@@ -255,8 +341,9 @@ ipcMain.handle('get-thumb', async (e, f) => {
   } catch { return null; }
 });
 
-ipcMain.handle('read-image', async (e, f) => {
+handle('read-image', async (e, f) => {
   try {
+    assertLibraryPath(f);
     const st = await fsp.stat(f);
     const buf = await fsp.readFile(f);
     const mime = MIME[path.extname(f).toLowerCase()] || 'image/png';
@@ -264,7 +351,7 @@ ipcMain.handle('read-image', async (e, f) => {
   } catch { return null; }
 });
 
-ipcMain.handle('update-image', async (e, p, patch) => {
+handle('update-image', async (e, p, patch) => {
   const allowed = {};
   if (Array.isArray(patch.tags)) allowed.tags = patch.tags.filter(t => typeof t === 'string' && t.trim()).map(t => t.trim());
   if (typeof patch.note === 'string') allowed.note = patch.note;
@@ -299,7 +386,7 @@ function hamming(a, b) {
   return c;
 }
 
-ipcMain.handle('get-duplicates', async () => {
+handle('get-duplicates', async () => {
   const imgs = DB.getImages().filter(i => !i.trashed && !i.missing);
   const lite = i => ({ path: i.path, type: i.type, size: i.size, date: imgDateOf(i), mtime: i.mtime, quickHash: i.quickHash, phash: i.phash });
   // 完全重复（快速哈希相同）
@@ -334,13 +421,20 @@ ipcMain.handle('get-duplicates', async () => {
   return { exact, similar };
 });
 
-ipcMain.handle('rename-files', async (e, pairs) => {
+handle('rename-files', async (e, pairs) => {
   const results = [];
   for (const { path: p, newName } of pairs) {
     try {
+      assertLibraryPath(p);
       const dir = path.dirname(p);
       const ext = path.extname(p);
-      let target = path.join(dir, newName + ext);
+      const clean = safeBaseName(newName);
+      if (!clean) throw new Error('文件名不能为空');
+      let target = path.join(dir, clean + ext);
+      // 双保险：目标必须和原文件同目录，杜绝 ../ 穿越
+      if (path.dirname(path.resolve(target)).toLowerCase() !== path.resolve(dir).toLowerCase()) {
+        throw new Error('非法文件名');
+      }
       let k = 1;
       while (path.normalize(target).toLowerCase() !== path.normalize(p).toLowerCase() && fs.existsSync(target)) {
         target = path.join(dir, `${newName}_${k}${ext}`);
@@ -355,10 +449,11 @@ ipcMain.handle('rename-files', async (e, pairs) => {
   return results;
 });
 
-ipcMain.handle('move-files', async (e, paths, dest) => {
+handle('move-files', async (e, paths, dest) => {
   const results = [];
   for (const p of paths) {
     try {
+      assertLibraryPath(p);
       let target = path.join(dest, path.basename(p));
       const ext = path.extname(p);
       const base = path.basename(p, ext);
@@ -526,7 +621,7 @@ async function trashToRecycleBin(filePath) {
   }
 }
 
-ipcMain.handle('trash-files', async (e, paths) => {
+handle('trash-files', async (e, paths) => {
   // 软删除：只把图片在数据库里标记为 trashed，不碰物理文件，不进系统回收站。
   // 主视图通过 live() 过滤 trashed 的图片，所以会立即从界面消失；
   // 用户可在左侧"回收站"视图查看这些图片，需要时还能恢复（untrash）。
@@ -548,10 +643,11 @@ ipcMain.handle('trash-files', async (e, paths) => {
  * 与 trash-files（软删，只改 DB 不碰文件）互补：用户要"真正删除文件"时用这个。
  * trashToRecycleBin 已实现多重兜底（shell.trashItem → PowerShell → cmd → unlink），
  * NSFW 图片同样走本地路径，绝不上传。 */
-ipcMain.handle('purge-files', async (e, paths) => {
+handle('purge-files', async (e, paths) => {
   const results = [];
   for (const p of paths) {
     try {
+      assertLibraryPath(p);
       const r = await trashToRecycleBin(p);
       if (r && r.ok) {
         DB.removeImages([p]); // 物理文件已进回收站，DB 记录也清掉
@@ -574,35 +670,47 @@ ipcMain.handle('purge-files', async (e, paths) => {
   return results;
 });
 
-ipcMain.handle('remove-records', async (e, paths) => {
+handle('remove-records', async (e, paths) => {
+  for (const p of paths) assertLibraryPath(p);
   DB.removeImages(paths);
   DB.flushSync();
   return { ok: true };
 });
 
-ipcMain.handle('revive-files', async (e, paths) => {
+handle('revive-files', async (e, paths) => {
   // 从软件回收站恢复：把 trashed/missing 改回 false，图片重新出现在主视图
-  for (const p of paths) DB.revive(p);
+  for (const p of paths) { assertLibraryPath(p); DB.revive(p); }
   DB.flushSync();
   return { ok: true, count: paths.length };
 });
 
 /* 相册 */
-ipcMain.handle('create-album', (e, name) => DB.createAlbum(String(name).trim() || '未命名相册'));
-ipcMain.handle('delete-album', (e, id) => { DB.deleteAlbum(id); DB.flushSync(); return { ok: true }; });
-ipcMain.handle('rename-album', (e, id, name) => { DB.renameAlbum(id, String(name).trim()); DB.flushSync(); return { ok: true }; });
-ipcMain.handle('add-to-album', (e, id, paths) => { DB.addToAlbum(id, paths); DB.flushSync(); return { ok: true }; });
+handle('create-album', (e, name) => DB.createAlbum(String(name).trim() || '未命名相册'));
+handle('delete-album', (e, id) => { DB.deleteAlbum(id); DB.flushSync(); return { ok: true }; });
+handle('rename-album', (e, id, name) => { DB.renameAlbum(id, String(name).trim()); DB.flushSync(); return { ok: true }; });
+handle('add-to-album', (e, id, paths) => { DB.addToAlbum(id, paths); DB.flushSync(); return { ok: true }; });
 // 独占式加入：一张图只属一个相册，加入时自动从其他相册移除
-ipcMain.handle('assign-album', (e, id, paths) => { DB.assignAlbum(id, paths); DB.flushSync(); return { ok: true }; });
-ipcMain.handle('remove-from-album', (e, id, paths) => { DB.removeFromAlbum(id, paths); DB.flushSync(); return { ok: true }; });
+handle('assign-album', (e, id, paths) => { DB.assignAlbum(id, paths); DB.flushSync(); return { ok: true }; });
+handle('remove-from-album', (e, id, paths) => { DB.removeFromAlbum(id, paths); DB.flushSync(); return { ok: true }; });
 
-ipcMain.handle('open-in-folder', (e, p) => { shell.showItemInFolder(p); return { ok: true }; });
-ipcMain.handle('set-flag', (e, k, v) => { DB.setFlag(k, v); return { ok: true }; });
+handle('open-in-folder', (e, p) => {
+  assertLibraryPath(p);
+  shell.showItemInFolder(p);
+  return { ok: true };
+});
+// 只允许这几个纯 UI 偏好的键，防止被拿来绕过 cloud-config 的加密写入
+const FLAG_ALLOWLIST = new Set(['thumbSize', 'guided', 'nsfwMode', 'autoUpdateCheck', 'lang']);
+handle('set-flag', (e, k, v) => {
+  if (!FLAG_ALLOWLIST.has(String(k))) return { ok: false, error: 'flag not allowed' };
+  DB.setFlag(k, v);
+  return { ok: true };
+});
 
 /* 右键菜单用到的系统能力 */
 // 复制图片本体到剪贴板：nativeImage 支持 png/jpg/bmp，webp/gif 返回空图要告诉用户
-ipcMain.handle('copy-image', (e, p) => {
+handle('copy-image', (e, p) => {
   try {
+    assertLibraryPath(p);
     const img = nativeImage.createFromPath(p);
     if (img.isEmpty()) return { ok: false, error: '该格式无法复制为图片' };
     clipboard.writeImage(img);
@@ -611,9 +719,10 @@ ipcMain.handle('copy-image', (e, p) => {
     return { ok: false, error: String(err.message || err) };
   }
 });
-ipcMain.handle('copy-text', (e, t) => { clipboard.writeText(String(t == null ? '' : t)); return { ok: true }; });
-ipcMain.handle('open-path', async (e, p) => {
+handle('copy-text', (e, t) => { clipboard.writeText(String(t == null ? '' : t)); return { ok: true }; });
+handle('open-path', async (e, p) => {
   try {
+    assertLibraryPath(p);
     const err = await shell.openPath(p);
     return err ? { ok: false, error: err } : { ok: true };
   } catch (err) {
@@ -622,7 +731,7 @@ ipcMain.handle('open-path', async (e, p) => {
 });
 // 输入框里右键：走系统原生编辑菜单（撤销/剪切/复制/粘贴/全选），
 // Electron 默认不提供，不补的话搜索框里没法右键粘贴。
-ipcMain.handle('show-edit-menu', (e, labels = {}) => {
+handle('show-edit-menu', (e, labels = {}) => {
   const menu = Menu.buildFromTemplate([
     { role: 'undo', label: labels.undo || 'Undo' },
     { role: 'redo', label: labels.redo || 'Redo' },
@@ -680,13 +789,13 @@ async function imageDataUrlForCloud(im, maxSide = 1024, quality = 85) {
   return 'data:image/jpeg;base64,' + jpeg.toString('base64');
 }
 
-ipcMain.handle('ai-status', async () => ({ running: aiRunning }));
+handle('ai-status', async () => ({ running: aiRunning }));
 
-ipcMain.handle('ai-classify-all', async (e, opts) => {
+handle('ai-classify-all', async (e, opts) => {
   if (aiRunning) return { busy: true };
   const redo = !!(opts && opts.redo);
   const runNsfw = !opts || opts.nsfw !== false;
-  const cfg = DB.getFlags().cloudAI || {};
+  const cfg = cloudConfigResolved();
   if (!cfg.baseURL || !cfg.apiKey || !cfg.model) {
     return { ok: false, error: '还没有配置 AI 接口：点侧栏「设置 → AI 识别」填入服务商、API 地址、Key 和模型名' };
   }
@@ -795,19 +904,49 @@ ipcMain.handle('ai-classify-all', async (e, opts) => {
   }
 });
 
-ipcMain.handle('ai-stop', async () => { aiCancel = true; return { ok: true }; });
+handle('ai-stop', async () => { aiCancel = true; return { ok: true }; });
 
 /* ---------------- 云端配置 ---------------- */
-ipcMain.handle('cloud-config-get', async () => DB.getFlags().cloudAI || {});
-ipcMain.handle('cloud-config-set', async (e, cfg) => { DB.setFlag('cloudAI', cfg || {}); return { ok: true }; });
-ipcMain.handle('cloud-config-test', async (e, cfg) => CloudAI.testConfig(cfg));
-ipcMain.handle('cloud-providers', async () => CloudAI.PROVIDERS);
+handle('cloud-config-get', async () => {
+  // 只回「有没有 key」和掩码，明文 key 永远不进渲染进程
+  const cfg = DB.getFlags().cloudAI || {};
+  const key = decryptApiKey(cfg);
+  const { apiKey, apiKeyEnc, ...rest } = cfg;
+  return {
+    ...rest,
+    hasKey: !!key,
+    keyMask: key ? key.slice(0, 3) + '…' + key.slice(-4) : ''
+  };
+});
+handle('cloud-config-set', async (e, cfg) => {
+  const old = DB.getFlags().cloudAI || {};
+  const src = cfg || {};
+  const next = { ...src };
+  delete next.apiKey; delete next.apiKeyEnc; delete next.hasKey; delete next.keyMask;
+  const incoming = String(src.apiKey || '').trim();
+  if (incoming) {
+    Object.assign(next, encryptApiKey(incoming));          // 换了新 key
+  } else if (old.apiKeyEnc) {
+    next.apiKeyEnc = old.apiKeyEnc;                        // 留空 = 保持不变
+  } else if (old.apiKey) {
+    next.apiKey = old.apiKey;
+  }
+  DB.setFlag('cloudAI', next);
+  DB.flushSync();
+  return { ok: true, hasKey: !!(next.apiKeyEnc || next.apiKey) };
+});
+handle('cloud-config-test', async (e, cfg) => {
+  const c = { ...(cfg || {}) };
+  if (!c.apiKey) c.apiKey = decryptApiKey(DB.getFlags().cloudAI || {});   // 用已保存的 key 测试
+  return CloudAI.testConfig(c);
+});
+handle('cloud-providers', async () => CloudAI.PROVIDERS);
 
 /* ---------------- 批量标注分类 ----------------
  * 用户像数据标注一样手动给图片指定分类（aiManual=true，AI 不再覆盖）。
  * 传空 category 表示清除手动分类标记。
  */
-ipcMain.handle('batch-set-category', async (e, paths, category) => {
+handle('batch-set-category', async (e, paths, category) => {
   const list = Array.isArray(paths) ? paths : [];
   const v = String(category || '').trim();
   for (const p of list) {
@@ -826,7 +965,7 @@ ipcMain.handle('batch-set-category', async (e, paths, category) => {
  * 并标记 aiManual，保证重新识别时不会把名字改回去。
  * 若目标名已存在，等同于把两组并到一起。
  */
-ipcMain.handle('rename-category', async (e, from, to) => {
+handle('rename-category', async (e, from, to) => {
   const f = String(from || '').trim();
   const t = String(to || '').trim();
   if (!f) return { ok: false, error: '原分类名为空' };
@@ -894,7 +1033,7 @@ function setupAutoUpdater() {
   }, 8000);
 }
 
-ipcMain.handle('update-check', async () => {
+handle('update-check', async () => {
   if (!app.isPackaged) return { ok: false, error: '开发模式下不检查更新' };
   try {
     const r = await autoUpdater.checkForUpdates();
@@ -903,25 +1042,25 @@ ipcMain.handle('update-check', async () => {
     return { ok: false, error: String(e.message || e) };
   }
 });
-ipcMain.handle('update-download', async () => {
+handle('update-download', async () => {
   try { await autoUpdater.downloadUpdate(); return { ok: true }; }
   catch (e) { return { ok: false, error: String(e.message || e) }; }
 });
-ipcMain.handle('update-install', async () => {
+handle('update-install', async () => {
   setImmediate(() => { try { autoUpdater.quitAndInstall(); } catch (e) { console.error('install err', e); } });
   return { ok: true };
 });
-ipcMain.handle('app-version', async () => app.getVersion());
+handle('app-version', async () => app.getVersion());
 
 /* 设置面板用：版本 / 数据目录 / 平台信息 */
-ipcMain.handle('app-info', async () => ({
+handle('app-info', async () => ({
   version: app.getVersion(),
   dataDir: app.getPath('userData'),
   isPackaged: app.isPackaged,
   platform: process.platform
 }));
 
-ipcMain.handle('open-data-dir', async () => {
+handle('open-data-dir', async () => {
   try { await shell.openPath(app.getPath('userData')); return { ok: true }; }
   catch (e) { return { ok: false, error: String(e.message || e) }; }
 });

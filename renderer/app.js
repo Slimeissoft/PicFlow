@@ -2021,7 +2021,7 @@ function scheduleGrid() {
 async function runAiClassify() {
   if (state.aiRunning) return;
   const cfg = state.flags.cloudAI || {};
-  if (!cfg.baseURL || !cfg.apiKey || !cfg.model) {
+  if (!cfg.baseURL || !cfg.hasKey || !cfg.model) {
     const go = await confirmModal(
       '需要先配置 AI 接口',
       'AI 识别使用你自己的多模态大模型 API（OpenAI / Claude / DeepSeek / 通义千问 / Kimi / 豆包 / 硅基流动等）。\n\n图片识别会产生少量 API 费用，由你的账号承担。\n\n现在去配置吗？',
@@ -2131,8 +2131,8 @@ async function settingsModal(initialTab = 'general') {
           </div>
           <div class="row">
             <label class="f-label">API Key</label>
-            <input type="password" id="st-key" placeholder="sk-..." value="${esc(cfg.apiKey || '')}">
-            <div class="hint">${tr('只保存在本机 library.json，不会上传到任何服务器')}</div>
+            <input type="password" id="st-key" autocomplete="off" placeholder="${cfg.hasKey ? esc(cfg.keyMask || '已保存') : 'sk-...'}" value="">
+            <div class="hint">${cfg.hasKey ? tr('已加密保存在本机；留空则保持当前 Key 不变') : tr('只保存在本机 library.json，不会上传到任何服务器')}</div>
           </div>
           <div class="row">
             <label class="f-label">${tr('模型名')}</label>
@@ -2224,7 +2224,7 @@ async function settingsModal(initialTab = 'general') {
   ov.querySelector('#st-test').onclick = async () => {
     const btn = ov.querySelector('#st-test');
     const c = collectAI();
-    if (!c.baseURL || !c.apiKey) { toast('请先填 API 地址和 Key'); return; }
+    if (!c.baseURL || (!c.apiKey && !cfg.hasKey)) { toast('请先填 API 地址和 Key'); return; }
     btn.textContent = '测试中…'; btn.disabled = true;
     const r = await api.cloudConfigTest(c);
     btn.textContent = tr('测试连接'); btn.disabled = false;
@@ -2273,12 +2273,12 @@ async function settingsModal(initialTab = 'general') {
   ov.querySelector('#st-save').onclick = async () => {
     const c = collectAI();
     const filled = !!(c.baseURL || c.apiKey || c.model);
-    if (filled && (!c.baseURL || !c.apiKey || !c.model)) {
+    if (filled && (!c.baseURL || (!c.apiKey && !cfg.hasKey) || !c.model)) {
       toast('AI 配置不完整：API 地址、Key、模型名都要填');
       return;
     }
-    await api.cloudConfigSet(c);
-    state.flags.cloudAI = c;
+    const saved = await api.cloudConfigSet(c);
+    state.flags.cloudAI = { ...c, apiKey: '', hasKey: !!(saved && saved.hasKey) };
     const autoOn = autoBtn.classList.contains('on');
     await api.setFlag('autoUpdateCheck', autoOn);
     state.flags.autoUpdateCheck = autoOn;
