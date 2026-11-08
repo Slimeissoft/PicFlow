@@ -7,7 +7,7 @@
 <p align="center">Windows / macOS 桌面图片管理工具 · 本地管理 · 云端 AI 识别 · 隐私优先</p>
 
 <p align="center">
-  <a href="https://github.com/Slimeissoft/PicFlow/releases/latest"><img src="https://img.shields.io/badge/version-1.6.3-22C55E?style=flat-square" alt="version"></a>
+  <a href="https://github.com/Slimeissoft/PicFlow/releases/latest"><img src="https://img.shields.io/badge/version-1.6.4-22C55E?style=flat-square" alt="version"></a>
   <img src="https://img.shields.io/badge/platform-Windows%20%2F%20macOS-0078D6?style=flat-square" alt="platform">
   <img src="https://img.shields.io/badge/license-MIT-F97316?style=flat-square" alt="license">
   <img src="https://img.shields.io/badge/AI-Cloud%20Vision-8B5CF6?style=flat-square" alt="ai">
@@ -56,17 +56,17 @@
 
 ## 安装
 
-当前最新版 **1.6.3**。Windows 与 macOS 都从 [Releases](https://github.com/Slimeissoft/PicFlow/releases/latest) 下载。
+当前最新版 **1.6.4**。Windows 与 macOS 都从 [Releases](https://github.com/Slimeissoft/PicFlow/releases/latest) 下载。
 
 **Windows（10 / 11 x64）**
 
-1. 下载 `PicFlow-Setup-1.6.3.exe`
+1. 下载 `PicFlow-Setup-1.6.4.exe`
 2. 双击安装（可自选安装目录）
 3. 首次启动点「扫描文件夹」导入图片
 
 **macOS（11 Big Sur 及以上，Apple Silicon / Intel）**
 
-1. 下载 `PicFlow-1.6.3-arm64.dmg`（M 系列芯片）或 `PicFlow-1.6.3-x64.dmg`（Intel）
+1. 下载 `PicFlow-1.6.4-arm64.dmg`（M 系列芯片）或 `PicFlow-1.6.4-x64.dmg`（Intel）
 2. 打开 dmg，把「PicFlow」拖进「应用程序」
 3. **首次打开请右键 App →「打开」**：这个版本没有 Apple 开发者证书，只做了 ad-hoc 签名，系统会拦一次
 4. 若提示「已损坏，无法打开」，在终端执行：
@@ -192,6 +192,12 @@ npm run dist   # 打包 Windows 安装版（输出到 release/）
 - 本地离线识别已移除；无网络时 AI 分类不可用（图库管理功能不受影响）
 
 ## 更新记录
+
+**v1.6.4**（2026-11-08）
+
+- 产品名简化为 **PicFlow**（去掉「图片管家」）：窗口标题、开始菜单、卸载列表、macOS 应用名一并更新
+- **升级自动迁移数据**：图库、缩略图与界面偏好从旧目录 `%APPDATA%\PicFlow 图片管家` 导入到 `%APPDATA%\PicFlow`，旧目录保留，确认无误后可手动删除
+- 安装位置随之变化：Windows 为 `PicFlow`，macOS 为 `PicFlow.app`
 
 **v1.6.3**（2026-11-06）
 

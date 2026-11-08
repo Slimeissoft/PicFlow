@@ -7,7 +7,7 @@
 <p align="center">A Windows and macOS desktop photo library · local-first · cloud AI tagging · privacy-first</p>
 
 <p align="center">
-  <a href="https://github.com/Slimeissoft/PicFlow/releases/latest"><img src="https://img.shields.io/badge/version-1.6.3-22C55E?style=flat-square" alt="version"></a>
+  <a href="https://github.com/Slimeissoft/PicFlow/releases/latest"><img src="https://img.shields.io/badge/version-1.6.4-22C55E?style=flat-square" alt="version"></a>
   <img src="https://img.shields.io/badge/platform-Windows%20%2F%20macOS-0078D6?style=flat-square" alt="platform">
   <img src="https://img.shields.io/badge/license-MIT-F97316?style=flat-square" alt="license">
   <img src="https://img.shields.io/badge/AI-Cloud%20Vision-8B5CF6?style=flat-square" alt="ai">
@@ -55,17 +55,17 @@ The overview is sorted by image count. Categories can be renamed or merged, and 
 
 ## Install
 
-Latest release: **1.6.3**. Both platforms download from [Releases](https://github.com/Slimeissoft/PicFlow/releases/latest).
+Latest release: **1.6.4**. Both platforms download from [Releases](https://github.com/Slimeissoft/PicFlow/releases/latest).
 
 **Windows (10 / 11 x64)**
 
-1. Download `PicFlow-Setup-1.6.3.exe`
+1. Download `PicFlow-Setup-1.6.4.exe`
 2. Run the installer (you can pick the install directory)
 3. On first launch, click **Scan folder** to import your images
 
 **macOS (11 Big Sur or later, Apple Silicon / Intel)**
 
-1. Download `PicFlow-1.6.3-arm64.dmg` (M-series) or `PicFlow-1.6.3-x64.dmg` (Intel)
+1. Download `PicFlow-1.6.4-arm64.dmg` (M-series) or `PicFlow-1.6.4-x64.dmg` (Intel)
 2. Open the dmg and drag "PicFlow" into Applications
 3. **First launch: right-click the app → Open.** This build has no Apple Developer certificate
    (ad-hoc signed only), so Gatekeeper blocks it once
@@ -190,6 +190,14 @@ Key files:
 - Offline local recognition was removed; AI tagging needs a network connection (everything else works offline)
 
 ## Changelog
+
+**v1.6.4** (2026-11-08)
+
+- The product is now simply **PicFlow** (the "图片管家" suffix is gone): window title, Start-menu
+  entry, uninstall entry and the macOS app name all updated
+- **Data migrates automatically on upgrade**: library, thumbnails and UI preferences move from the
+  old `%APPDATA%\PicFlow 图片管家` folder to `%APPDATA%\PicFlow`; the old folder is kept and can be deleted once verified
+- Install locations follow the new name: `PicFlow` on Windows, `PicFlow.app` on macOS
 
 **v1.6.3** (2026-11-06)
 

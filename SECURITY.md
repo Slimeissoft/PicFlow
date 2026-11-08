@@ -8,7 +8,7 @@ reports are taken seriously.
 
 | Version | Supported | Notes |
 | --- | --- | --- |
-| 1.6.2 | :white_check_mark: | Current release, includes the security hardening below |
+| 1.6.2 – 1.6.4 | :white_check_mark: | Current releases, include the security hardening below |
 | 1.6.0 – 1.6.1 | :warning: | Upgrade recommended — navigation isolation, IPC validation, path allowlisting and API-key encryption are missing |
 | ≤ 1.5.0 | :x: | Not supported |
 
@@ -62,7 +62,7 @@ reasonable window to ship a fix before publishing details — 90 days, or sooner
 - Missing code signing / SmartScreen warnings (known; tracked separately)
 - Vulnerabilities in Electron itself that have no practical exploit path in this app
 
-## Security Design (as of 1.6.2)
+## Security Design (as of 1.6.4)
 
 - `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`; the preload exposes a fixed,
   small API through `contextBridge`
@@ -84,7 +84,7 @@ PicFlow 是一款本地优先的 Windows 桌面应用（Electron）。它会读�
 
 | 版本 | 支持 | 说明 |
 | --- | --- | --- |
-| 1.6.2 | :white_check_mark: | 当前版本，包含下述安全加固 |
+| 1.6.2 – 1.6.4 | :white_check_mark: | 当前版本，包含下述安全加固 |
 | 1.6.0 – 1.6.1 | :warning: | 建议升级——缺少导航隔离、IPC 校验、路径白名单与 API Key 加密 |
 | ≤ 1.5.0 | :x: | 不再支持 |
 
@@ -137,7 +137,7 @@ PicFlow 是一款本地优先的 Windows 桌面应用（Electron）。它会读�
 - 缺少代码签名 / SmartScreen 拦截提示（已知，另行处理）
 - Electron 上游漏洞，但在此应用中无可利用路径
 
-### 安全设计（截至 1.6.2）
+### 安全设计（截至 1.6.4）
 
 - `contextIsolation: true`、`sandbox: true`、`nodeIntegration: false`；preload 通过
   `contextBridge` 只暴露一组固定的少量接口
