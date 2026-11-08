@@ -84,25 +84,24 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.ver.outputs.version }}
-          name: PicFlow 图片管家 v${{ steps.ver.outputs.version }}
+          name: PicFlow v${{ steps.ver.outputs.version }}
           draft: false
           prerelease: false
           files: dist/**/*
           body: |
-            ## PicFlow 图片管家 v${{ steps.ver.outputs.version }}
+            ## PicFlow v${{ steps.ver.outputs.version }}
 
-            首个 macOS 版本（Apple Silicon / Intel 双架构），Windows 版同步更新。
+            ### 下载
+            - **Windows**：`PicFlow-Setup-${{ steps.ver.outputs.version }}.exe`（NSIS 安装包，支持应用内自动更新）
+            - **macOS**：`PicFlow-${{ steps.ver.outputs.version }}-arm64.dmg`（M 系列）/ `PicFlow-${{ steps.ver.outputs.version }}-x64.dmg`（Intel）
 
-            ### macOS
-            - 新增 macOS 支持：`arm64`（M 系列）与 `x64`（Intel）各提供 `dmg` 与 `zip`
-            - 平台适配：⌘ 快捷键、⌫ 删除、系统应用菜单、废纸篓
-            - **当前为 ad-hoc 签名、未公证**：首次打开请右键 App →「打开」，
-              或执行 `xattr -cr "/Applications/PicFlow 图片管家.app"`
-            - macOS 版暂不支持应用内自动更新，请从本页下载新版
+            ### macOS 说明
+            macOS 版为 ad-hoc 签名、未公证。首次打开请**右键 App →「打开」**，或执行：
 
-            ### Windows
-            - 行为与此前版本一致，同步版本号（安装包仍是 NSIS，支持应用内自动更新）
+            ```bash
+            xattr -cr "/Applications/PicFlow.app"
+            ```
 
-            ### 文档
-            - 重写 `SECURITY.md`：支持版本、漏洞报告流程、范围与安全设计
-            - README 新增 English / 繁體中文 / 日本語 版本
+            macOS 版暂不支持应用内自动更新，新版本请从本页下载。
+
+            完整更新记录见 [README](https://github.com/Slimeissoft/PicFlow#更新记录)。

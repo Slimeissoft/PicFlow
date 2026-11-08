@@ -7,7 +7,7 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'picflow-thumb', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, bypassCSP: true } }
 ]);
 
-const D = 'C:/Users/Lenovo/AppData/Roaming/PicFlow 图片管家';
+const D = process.env.APPDATA + '/PicFlow';   // 产品名去掉「图片管家」后的数据目录
 
 app.whenReady().then(async () => {
   protocol.handle('picflow-thumb', async request => {

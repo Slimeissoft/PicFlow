@@ -75,6 +75,66 @@ function cloudConfigResolved() {
   return { ...cfg, apiKey: decryptApiKey(cfg) };
 }
 
+/* ============================================================
+ * 旧数据目录迁移（产品名从「PicFlow 图片管家」改为 PicFlow）
+ *
+ * Electron 的 userData 目录名取自应用名，改名后会从
+ *   %APPDATA%\PicFlow 图片管家   →   %APPDATA%\PicFlow
+ * 老用户的 library.json / thumbs 都躺在旧目录里。这段必须在任何
+ * 读写之前跑完（模块加载期），否则升级后打开就是空图库。
+ *
+ * 策略：只搬「真的属于用户」的东西（索引 + 缩略图），
+ * Chromium 自己的缓存让它在新目录重建。搬不动就把 userData
+ * 指回旧目录 —— 宁可目录名难看，也不能让人看不到图。
+ * ============================================================ */
+(function migrateLegacyUserData() {
+  if (!app.isPackaged) return;                      // 开发模式不碰
+  const appData = app.getPath('appData');
+  const legacy = path.join(appData, 'PicFlow 图片管家');
+  const current = app.getPath('userData');
+  if (path.resolve(legacy) === path.resolve(current)) return;
+
+  const libOf = d => path.join(d, 'library.json');
+  const mark = path.join(current, '.migrated-from-legacy');
+  const countImages = f => {
+    try {
+      const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+      return Array.isArray(j.images) ? j.images.length : 0;
+    } catch { return 0; }
+  };
+
+  try {
+    if (!fs.existsSync(libOf(legacy))) return;      // 全新安装，没有旧数据
+    if (fs.existsSync(mark)) return;                // 已经处理过
+    if (countImages(libOf(current)) > 0) {          // 新目录已有真图库，绝不覆盖
+      fs.writeFileSync(mark, new Date().toISOString());
+      return;
+    }
+    fs.mkdirSync(current, { recursive: true });
+    // current 里有空库（例如开发模式跑过一次）先留个备份，再整份换成旧图库
+    if (fs.existsSync(libOf(current))) {
+      fs.copyFileSync(libOf(current), libOf(current) + '.bak-before-migrate');
+    }
+    const tmp = libOf(current) + '.migrating';
+    fs.copyFileSync(libOf(legacy), tmp);
+    fs.renameSync(tmp, libOf(current));             // 原子落位，避免半截 JSON
+    // thumbs = 缩略图缓存；Local Storage 里放着语言、侧栏折叠等界面偏好
+    const isEmptyDir = d => fs.existsSync(d) && fs.statSync(d).isDirectory() && fs.readdirSync(d).length === 0;
+    for (const sub of ['thumbs', 'Local Storage']) {
+      const from = path.join(legacy, sub);
+      const to = path.join(current, sub);
+      if (!fs.existsSync(from)) continue;
+      if (fs.existsSync(to) && !isEmptyDir(to)) continue;   // 新目录里已经有内容，不覆盖
+      fs.cpSync(from, to, { recursive: true, force: true });
+    }
+    fs.writeFileSync(mark, new Date().toISOString());
+    console.log('[migrate] 已从旧数据目录导入图库：', legacy, '→', current);
+  } catch (e) {
+    console.error('[migrate] 迁移失败，继续使用旧目录：', e.message);
+    try { app.setPath('userData', legacy); } catch (e2) { console.error('[migrate]', e2.message); }
+  }
+})();
+
 // 自定义协议：缩略图直接由 Chromium 加载（不经 IPC + base64，启动/浏览快数倍）
 protocol.registerSchemesAsPrivileged([
   {
@@ -104,7 +164,7 @@ function createWindow() {
     backgroundColor: '#f6f7f8',
     autoHideMenuBar: true,
     show: false,
-    title: 'PicFlow 图片管家',
+    title: 'PicFlow',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

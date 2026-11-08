@@ -66,13 +66,13 @@
 **macOS（11 Big Sur 以降、Apple Silicon / Intel）**
 
 1. `PicFlow-1.6.3-arm64.dmg`（M シリーズ）または `PicFlow-1.6.3-x64.dmg`（Intel）をダウンロード
-2. dmg を開き、「PicFlow 图片管家」をアプリケーションフォルダーへドラッグ
+2. dmg を開き、「PicFlow」をアプリケーションフォルダーへドラッグ
 3. **初回起動はアプリを右クリック →「開く」**：Apple の開発者証明書がないため ad-hoc 署名のみで、
    システムに一度ブロックされます
 4. 「壊れているため開けません」と出た場合はターミナルで：
 
    ```bash
-   xattr -cr "/Applications/PicFlow 图片管家.app"
+   xattr -cr "/Applications/PicFlow.app"
    ```
 
 macOS 版はアプリ内自動アップデートに未対応です。新しい版は Releases から取得してください。
@@ -152,12 +152,14 @@ macOS では下記の `Ctrl` を `⌘`、`Del` を `⌫` と読み替えてく�
 
 | 内容 | 場所 |
 |---|---|
-| ライブラリデータ（分類 / アルバム / タグ / メモ） | `%APPDATA%\PicFlow 图片管家\library.json` |
-| サムネイルキャッシュ | `%APPDATA%\PicFlow 图片管家\thumbs\` |
+| ライブラリデータ（分類 / アルバム / タグ / メモ） | `%APPDATA%\PicFlow\library.json` |
+| サムネイルキャッシュ | `%APPDATA%\PicFlow\thumbs\` |
 | AI 設定（API キーは暗号化） | 同じ `library.json` の `flags.cloudAI` |
 | 画像ファイル | 元の場所のまま。PicFlow は移動もリネームもしません |
 
-バックアップは `library.json` をコピーするだけ（サムネイルは再生成できます）。
+macOS では `~/Library/Application Support/PicFlow/` になります。
+
+バックアップは `library.json` をコピーするだけ（サムネイルは再生成できます）。1.6.3 以前からアップデートすると、旧フォルダー `PicFlow 图片管家` のライブラリとサムネイルは自動で取り込まれます。取り込み後に旧フォルダーは削除して構いません。
 
 ## 開発
 

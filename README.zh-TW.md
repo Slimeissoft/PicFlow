@@ -67,12 +67,12 @@
 **macOS（11 Big Sur 以上，Apple Silicon / Intel）**
 
 1. 下載 `PicFlow-1.6.3-arm64.dmg`（M 系列晶片）或 `PicFlow-1.6.3-x64.dmg`（Intel）
-2. 開啟 dmg，把「PicFlow 图片管家」拖進「應用程式」
+2. 開啟 dmg，把「PicFlow」拖進「應用程式」
 3. **首次開啟請右鍵 App →「打開」**：這個版本沒有 Apple 開發者憑證，只做了 ad-hoc 簽章，系統會攔一次
 4. 若提示「已損毀，無法打開」，在終端機執行：
 
    ```bash
-   xattr -cr "/Applications/PicFlow 图片管家.app"
+   xattr -cr "/Applications/PicFlow.app"
    ```
 
 macOS 版暫不支援應用程式內自動更新，新版本請回到 Releases 下載。
@@ -154,12 +154,14 @@ macOS 上把下表的 `Ctrl` 讀作 `⌘`、`Del` 讀作 `⌫`（介面也會自
 
 | 內容 | 位置 |
 |---|---|
-| 圖庫資料（分類 / 相簿 / 標籤 / 備註） | `%APPDATA%\PicFlow 图片管家\library.json` |
-| 縮圖快取 | `%APPDATA%\PicFlow 图片管家\thumbs\` |
+| 圖庫資料（分類 / 相簿 / 標籤 / 備註） | `%APPDATA%\PicFlow\library.json` |
+| 縮圖快取 | `%APPDATA%\PicFlow\thumbs\` |
 | AI 設定（API Key 加密保存） | 同上 `library.json` 的 `flags.cloudAI` |
 | 你的圖片 | 原位不動，PicFlow 不移動 / 不改名 |
 
-備份只需複製 `library.json`（縮圖可重新產生）。
+macOS 上對應 `~/Library/Application Support/PicFlow/`。
+
+備份只需複製 `library.json`（縮圖可重新產生）。從 1.6.3 及更早版本升級時，舊目錄 `PicFlow 图片管家` 裡的圖庫與縮圖會自動匯入，之後舊目錄可以手動刪掉。
 
 ## 開發
 

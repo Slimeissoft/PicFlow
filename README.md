@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="docs/logo.png" width="108" height="108" alt="PicFlow 图片管家图标">
+  <img src="docs/logo.png" width="108" height="108" alt="PicFlow 图标">
 </p>
 
-<h1 align="center">PicFlow 图片管家</h1>
+<h1 align="center">PicFlow</h1>
 
 <p align="center">Windows / macOS 桌面图片管理工具 · 本地管理 · 云端 AI 识别 · 隐私优先</p>
 
@@ -67,12 +67,12 @@
 **macOS（11 Big Sur 及以上，Apple Silicon / Intel）**
 
 1. 下载 `PicFlow-1.6.3-arm64.dmg`（M 系列芯片）或 `PicFlow-1.6.3-x64.dmg`（Intel）
-2. 打开 dmg，把「PicFlow 图片管家」拖进「应用程序」
+2. 打开 dmg，把「PicFlow」拖进「应用程序」
 3. **首次打开请右键 App →「打开」**：这个版本没有 Apple 开发者证书，只做了 ad-hoc 签名，系统会拦一次
 4. 若提示「已损坏，无法打开」，在终端执行：
 
    ```bash
-   xattr -cr "/Applications/PicFlow 图片管家.app"
+   xattr -cr "/Applications/PicFlow.app"
    ```
 
 macOS 版暂不支持应用内自动更新，新版本请回到 Releases 下载。
@@ -154,12 +154,14 @@ macOS 上把下表的 `Ctrl` 读作 `⌘`、`Del` 读作 `⌫`（界面里也会
 
 | 内容 | 位置 |
 |---|---|
-| 图库数据（分类/相册/标签/备注） | `%APPDATA%\PicFlow 图片管家\library.json` |
-| 缩略图缓存 | `%APPDATA%\PicFlow 图片管家\thumbs\` |
+| 图库数据（分类/相册/标签/备注） | `%APPDATA%\PicFlow\library.json` |
+| 缩略图缓存 | `%APPDATA%\PicFlow\thumbs\` |
 | AI 配置（API Key 加密保存） | 同上 `library.json` 的 `flags.cloudAI` |
 | 你的图片 | 原位置不动，PicFlow 不移动/不改名 |
 
-备份只需复制 `library.json`（缩略图可重新生成）。
+macOS 上对应 `~/Library/Application Support/PicFlow/`。
+
+备份只需复制 `library.json`（缩略图可重新生成）。从 1.6.3 及更早版本升级时，旧目录 `PicFlow 图片管家` 里的图库与缩略图会自动导入，之后旧目录可以手动删掉。
 
 ## 开发
 

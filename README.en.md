@@ -66,13 +66,13 @@ Latest release: **1.6.3**. Both platforms download from [Releases](https://githu
 **macOS (11 Big Sur or later, Apple Silicon / Intel)**
 
 1. Download `PicFlow-1.6.3-arm64.dmg` (M-series) or `PicFlow-1.6.3-x64.dmg` (Intel)
-2. Open the dmg and drag "PicFlow 图片管家" into Applications
+2. Open the dmg and drag "PicFlow" into Applications
 3. **First launch: right-click the app → Open.** This build has no Apple Developer certificate
    (ad-hoc signed only), so Gatekeeper blocks it once
 4. If macOS says the app "is damaged and can't be opened", run:
 
    ```bash
-   xattr -cr "/Applications/PicFlow 图片管家.app"
+   xattr -cr "/Applications/PicFlow.app"
    ```
 
 The macOS build has no in-app auto-update yet — grab new versions from Releases.
@@ -152,12 +152,14 @@ When a new version appears, a bar shows up at the bottom:
 
 | Item | Location |
 |---|---|
-| Library data (categories / albums / tags / notes) | `%APPDATA%\PicFlow 图片管家\library.json` |
-| Thumbnail cache | `%APPDATA%\PicFlow 图片管家\thumbs\` |
+| Library data (categories / albums / tags / notes) | `%APPDATA%\PicFlow\library.json` |
+| Thumbnail cache | `%APPDATA%\PicFlow\thumbs\` |
 | AI config (API key encrypted) | `flags.cloudAI` inside the same `library.json` |
 | Your images | Stay where they are; PicFlow never moves or renames them |
 
-Backup only needs `library.json` (thumbnails can be regenerated).
+On macOS this is `~/Library/Application Support/PicFlow/`.
+
+Backup only needs `library.json` (thumbnails can be regenerated). When upgrading from 1.6.3 or earlier, the library and thumbnails in the old `PicFlow 图片管家` folder are imported automatically — you can delete that folder afterwards.
 
 ## Development
 

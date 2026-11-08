@@ -1,6 +1,6 @@
 {
   "name": "picflow",
-  "productName": "PicFlow 图片管家",
+  "productName": "PicFlow",
   "version": "1.6.3",
   "description": "本地图片整理与管理桌面应用（云端 AI 识别 + 本地 NSFW 过滤）",
   "main": "main.js",
@@ -21,7 +21,7 @@
   },
   "build": {
     "appId": "cn.picflow.imageManager",
-    "productName": "PicFlow 图片管家",
+    "productName": "PicFlow",
     "copyright": "Copyright © 2026 PicFlow",
     "publish": {
       "provider": "github",
@@ -62,8 +62,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "PicFlow 图片管家",
-      "uninstallDisplayName": "PicFlow 图片管家"
+      "shortcutName": "PicFlow",
+      "uninstallDisplayName": "PicFlow"
     },
     "mac": {
       "category": "public.app-category.photography",

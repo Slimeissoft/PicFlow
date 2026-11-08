@@ -11,7 +11,7 @@
  *   codesign --sign - 就是那个「至少」。
  *
  * 注意：ad-hoc 签名不等于公证。用户第一次打开仍需右键 →「打开」，
- * 或者执行 xattr -cr "/Applications/PicFlow 图片管家.app"。
+ * 或者执行 xattr -cr "/Applications/PicFlow.app"。
  * ============================================================ */
 const path = require('path');
 const { execFileSync } = require('child_process');

@@ -638,7 +638,7 @@ function updateEmptyState(items) {
     $('#view-head').classList.add('hidden');
     el.innerHTML = `<div class="empty-card">
       <div class="empty-logo">${ICONS.grid}</div>
-      <h2>${tr('欢迎使用 PicFlow 图片管家')}</h2>
+      <h2>${tr('欢迎使用 PicFlow')}</h2>
       <p>${tr('三步开始整理你的本地图片：')}</p>
       <ol>
         <li><b>${tr('导入')}</b> — ${tr('点击「扫描文件夹」，选择存放图片的目录（自动包含子文件夹）')}</li>
@@ -2176,7 +2176,7 @@ async function settingsModal(initialTab = 'general') {
 
         <div class="settings-pane${initialTab === 'about' ? ' active' : ''}" data-pane="about">
           <div class="settings-row">
-            <div><div class="sr-main">PicFlow 图片管家</div><div class="sr-sub">${tr('版本')} v${esc(info.version || '—')}</div></div>
+            <div><div class="sr-main">PicFlow</div><div class="sr-sub">${tr('版本')} v${esc(info.version || '—')}</div></div>
             <span class="pill" style="background:var(--accent-soft);color:var(--accent-dark)">Electron</span>
           </div>
           <div class="settings-row">
